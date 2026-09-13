@@ -2,6 +2,8 @@ import { GBA } from './core/gba.js';
 import { GBAControls } from './ui/controls.js';
 import { GBALibrary } from './ui/library.js';
 import { GBAShaders } from './ui/shaders.js';
+import { GBAMemoryScanner } from './core/memory-scanner.js';
+import { KEYS } from './core/gba-constants.js';
 
 window.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('gba-screen');
@@ -9,11 +11,14 @@ window.addEventListener('DOMContentLoaded', () => {
   const romBadge = document.getElementById('current-rom-name');
   const fpsBadge = document.getElementById('fps-counter');
   const powerLed = document.getElementById('power-led');
+  const hamburgerBtn = document.getElementById('btn-hamburger');
+  const hamburgerDropdown = document.getElementById('hamburger-dropdown');
 
-  // Initialize GBA Core
+  // Initialize GBA Subsystems
   const gba = new GBA(canvas);
   const controls = new GBAControls(gba);
   const shaders = new GBAShaders(canvasWrapper);
+  const scanner = new GBAMemoryScanner(gba);
 
   // FPS Update Hook
   gba.onFpsUpdate = (fps) => {
@@ -26,13 +31,29 @@ window.addEventListener('DOMContentLoaded', () => {
     romBadge.textContent = gba.getRomTitle() || fileName;
     powerLed.classList.remove('paused');
     closeAllModals();
+    scanner.reset();
   };
 
   const library = new GBALibrary(gba, handleLoadRom);
 
+  // --- Hamburger Menu Logic ---
+  if (hamburgerBtn && hamburgerDropdown) {
+    hamburgerBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hamburgerDropdown.classList.toggle('open');
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!hamburgerDropdown.contains(e.target) && e.target !== hamburgerBtn) {
+        hamburgerDropdown.classList.remove('open');
+      }
+    });
+  }
+
   // --- Modal Dialogs Handling ---
   const openModal = (id) => {
     closeAllModals();
+    if (hamburgerDropdown) hamburgerDropdown.classList.remove('open');
     const modal = document.getElementById(id);
     if (modal) modal.classList.add('open');
   };
@@ -47,23 +68,33 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Toolbar Modal Triggers
-  document.getElementById('btn-open-library')?.addEventListener('click', () => {
+  // Hamburger Menu Item Triggers
+  document.getElementById('menu-item-library')?.addEventListener('click', () => {
     library.renderLibraryList();
     openModal('modal-library');
   });
 
-  document.getElementById('btn-open-states')?.addEventListener('click', () => {
+  document.getElementById('menu-item-states')?.addEventListener('click', () => {
     renderSaveSlots();
     openModal('modal-states');
   });
 
-  document.getElementById('btn-open-cheats')?.addEventListener('click', () => {
+  document.getElementById('menu-item-cheats')?.addEventListener('click', () => {
     renderCheatsList();
     openModal('modal-cheats');
   });
 
-  document.getElementById('btn-open-settings')?.addEventListener('click', () => {
+  document.getElementById('menu-item-scanner')?.addEventListener('click', () => {
+    renderScannerFrozenList();
+    openModal('modal-scanner');
+  });
+
+  document.getElementById('menu-item-keybinds')?.addEventListener('click', () => {
+    renderKeybindGrid();
+    openModal('modal-keybinds');
+  });
+
+  document.getElementById('menu-item-settings')?.addEventListener('click', () => {
     openModal('modal-settings');
   });
 
@@ -91,7 +122,7 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    fileInput.addEventListener('change', (e) => {
+    fileInput.addEventListener('change', () => {
       if (fileInput.files.length > 0) {
         processRomFile(fileInput.files[0]);
       }
@@ -227,6 +258,191 @@ window.addEventListener('DOMContentLoaded', () => {
       codeInput.value = '';
       renderCheatsList();
     }
+  });
+
+  // --- Memory Scanner (Cheat Search) UI ---
+  const scannerValInput = document.getElementById('scanner-value-input');
+  const scannerTypeSelect = document.getElementById('scanner-datatype');
+  const btnScannerFirst = document.getElementById('btn-scanner-first');
+  const btnScannerNext = document.getElementById('btn-scanner-next');
+  const btnScannerReset = document.getElementById('btn-scanner-reset');
+  const scannerStatus = document.getElementById('scanner-status');
+  const scannerCount = document.getElementById('scanner-result-count');
+  const scannerResultsList = document.getElementById('scanner-results-list');
+  const scannerFrozenList = document.getElementById('scanner-frozen-list');
+
+  const updateScannerUI = () => {
+    scannerCount.textContent = scanner.results.length;
+    if (scanner.results.length === 0) {
+      scannerResultsList.innerHTML = `<div style="text-align: center; color: var(--text-dim); padding: 16px;">Chưa có kết quả tìm kiếm nào</div>`;
+      btnScannerNext.disabled = true;
+      return;
+    }
+
+    btnScannerNext.disabled = false;
+    const displayResults = scanner.results.slice(0, 50); // display first 50 results
+    scannerResultsList.innerHTML = displayResults.map(item => `
+      <div class="scanner-result-item">
+        <div>
+          <span class="scanner-addr">${item.formattedAddr}</span>
+          <span style="color: var(--text-dim); margin: 0 6px;">=</span>
+          <span class="scanner-val">${item.value}</span>
+        </div>
+        <div class="scanner-item-actions">
+          <button class="btn-mini btn-scanner-edit" data-addr="${item.address}">✏️ Sửa</button>
+          <button class="btn-mini btn-scanner-freeze" data-addr="${item.address}" data-val="${item.value}">❄️ Khóa</button>
+        </div>
+      </div>
+    `).join('');
+
+    if (scanner.results.length > 50) {
+      scannerResultsList.innerHTML += `<div style="text-align: center; color: var(--text-dim); font-size: 0.75rem; padding: 6px;">(Hiển thị 50 / ${scanner.results.length} kết quả, hãy đổi giá trị trong game rồi bấm "Lọc Tiếp")</div>`;
+    }
+
+    // Attach Edit & Freeze buttons
+    scannerResultsList.querySelectorAll('.btn-scanner-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const addr = parseInt(btn.getAttribute('data-addr'), 10);
+        const currentVal = scanner.readValue(addr);
+        const newVal = prompt(`Nhập giá trị mới cho địa chỉ 0x${addr.toString(16).toUpperCase()}:`, currentVal);
+        if (newVal !== null && newVal !== '') {
+          scanner.writeValue(addr, Number(newVal));
+          btnScannerNext.click(); // refresh list
+        }
+      });
+    });
+
+    scannerResultsList.querySelectorAll('.btn-scanner-freeze').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const addr = parseInt(btn.getAttribute('data-addr'), 10);
+        const currentVal = scanner.readValue(addr);
+        const freezeVal = prompt(`Khóa giá trị tại 0x${addr.toString(16).toUpperCase()} ở mức:`, currentVal);
+        if (freezeVal !== null && freezeVal !== '') {
+          gba.addFreeze(addr, Number(freezeVal), scanner.valueType);
+          renderScannerFrozenList();
+        }
+      });
+    });
+  };
+
+  const renderScannerFrozenList = () => {
+    if (!scannerFrozenList) return;
+    if (gba.freezeList.length === 0) {
+      scannerFrozenList.innerHTML = `<div style="color: var(--text-dim); font-size: 0.8rem; padding: 4px;">Chưa có ô nhớ nào được đóng băng.</div>`;
+      return;
+    }
+
+    scannerFrozenList.innerHTML = gba.freezeList.map(f => `
+      <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,242,254,0.06); padding:6px 10px; border-radius:6px; border:1px solid rgba(0,242,254,0.2);">
+        <div>
+          <span style="font-family:monospace; font-weight:700; color:var(--accent-cyan);">0x${f.address.toString(16).padStart(8, '0').toUpperCase()}</span>
+          <span style="color:#fff; margin-left:8px; font-weight:600;">Khóa: ${f.value} (${f.dataType})</span>
+        </div>
+        <button class="btn-delete-freeze" data-addr="${f.address}" style="background:transparent; border:none; color:#ff4444; cursor:pointer; font-weight:bold;">✕</button>
+      </div>
+    `).join('');
+
+    scannerFrozenList.querySelectorAll('.btn-delete-freeze').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const addr = parseInt(btn.getAttribute('data-addr'), 10);
+        gba.removeFreeze(addr);
+        renderScannerFrozenList();
+      });
+    });
+  };
+
+  btnScannerFirst?.addEventListener('click', () => {
+    const val = scannerValInput.value.trim();
+    if (val === '') {
+      alert('Vui lòng nhập giá trị cần tìm!');
+      return;
+    }
+    scanner.setValueType(scannerTypeSelect.value);
+    const results = scanner.searchFirst(Number(val));
+    scannerStatus.textContent = `Tìm thấy ${results.length} ô nhớ có giá trị ${val}. Hãy chơi tiếp để giá trị thay đổi rồi bấm "Lọc Tiếp".`;
+    updateScannerUI();
+  });
+
+  btnScannerNext?.addEventListener('click', () => {
+    const val = scannerValInput.value.trim();
+    if (val === '') {
+      alert('Vui lòng nhập giá trị mới để lọc tiếp!');
+      return;
+    }
+    const results = scanner.searchNext(Number(val));
+    scannerStatus.textContent = `Còn lại ${results.length} ô nhớ có giá trị ${val}.`;
+    updateScannerUI();
+  });
+
+  btnScannerReset?.addEventListener('click', () => {
+    scanner.reset();
+    scannerValInput.value = '';
+    scannerStatus.textContent = 'Nhập giá trị hiện tại của thông số game rồi bấm "Tìm Mới"';
+    updateScannerUI();
+  });
+
+  // --- Key Bindings Grid UI ---
+  const keyNames = {
+    [KEYS.A]: 'Nút A',
+    [KEYS.B]: 'Nút B',
+    [KEYS.L]: 'Nút L (Vai trái)',
+    [KEYS.R]: 'Nút R (Vai phải)',
+    [KEYS.START]: 'START',
+    [KEYS.SELECT]: 'SELECT',
+    [KEYS.UP]: 'D-Pad Lên',
+    [KEYS.DOWN]: 'D-Pad Xuống',
+    [KEYS.LEFT]: 'D-Pad Trái',
+    [KEYS.RIGHT]: 'D-Pad Phải'
+  };
+
+  const renderKeybindGrid = () => {
+    const grid = document.getElementById('keybind-grid');
+    if (!grid) return;
+
+    let html = '';
+    for (const [bitStr, name] of Object.entries(keyNames)) {
+      const bit = Number(bitStr);
+      const keys = controls.getKeysForButton(bit);
+      const displayKey = keys.length > 0 ? keys.map(k => k.replace('Key', '').replace('Arrow', '')).join(' / ') : 'Chưa gán';
+
+      html += `
+        <div class="keybind-row">
+          <span class="keybind-label">${name}</span>
+          <button class="keybind-btn" data-bit="${bit}">${displayKey}</button>
+        </div>
+      `;
+    }
+    grid.innerHTML = html;
+
+    let activeListeningBtn = null;
+
+    const handleKeyRebind = (e) => {
+      e.preventDefault();
+      if (!activeListeningBtn) return;
+      const bit = Number(activeListeningBtn.getAttribute('data-bit'));
+      controls.setKeyBinding(e.code, bit);
+      activeListeningBtn.classList.remove('listening');
+      window.removeEventListener('keydown', handleKeyRebind);
+      renderKeybindGrid();
+    };
+
+    grid.querySelectorAll('.keybind-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (activeListeningBtn) {
+          activeListeningBtn.classList.remove('listening');
+          window.removeEventListener('keydown', handleKeyRebind);
+        }
+        activeListeningBtn = btn;
+        btn.classList.add('listening');
+        btn.textContent = 'Nhấn phím...';
+        window.addEventListener('keydown', handleKeyRebind, { once: true });
+      });
+    });
+  };
+
+  document.getElementById('btn-reset-keys')?.addEventListener('click', () => {
+    controls.resetKeyMap();
+    renderKeybindGrid();
   });
 
   // --- Settings ---

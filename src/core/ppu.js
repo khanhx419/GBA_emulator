@@ -41,6 +41,20 @@ export class GBAPPU {
     this.layerPriority = new Int32Array(5);
 
     this.cyclesInScanline = 0;
+
+    // === OPTIMIZATION: Pre-computed color LUT (32768 entries) ===
+    this.colorLUT = new Uint32Array(32768);
+    this._buildColorLUT();
+  }
+
+  /** Pre-build RGB15 → RGBA32 lookup table */
+  _buildColorLUT() {
+    for (let c = 0; c < 32768; c++) {
+      const r = (c & 0x1F) << 3;
+      const g = ((c >> 5) & 0x1F) << 3;
+      const b = ((c >> 10) & 0x1F) << 3;
+      this.colorLUT[c] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+    }
   }
 
   reset() {
@@ -135,20 +149,11 @@ export class GBAPPU {
     }
   }
 
-  rgb15To32(c) {
-    const r = (c & 0x1F) << 3;
-    const g = ((c >> 5) & 0x1F) << 3;
-    const b = ((c >> 10) & 0x1F) << 3;
-    return (0xFF << 24) | (b << 16) | (g << 8) | r;
-  }
-
   renderScanline(line) {
     if (this.dispcnt & 0x0080) {
       // Forced Blank - render white
       const lineStart = line * SCREEN.WIDTH;
-      for (let x = 0; x < SCREEN.WIDTH; x++) {
-        this.framebuffer[lineStart + x] = 0xFFFFFFFF;
-      }
+      this.framebuffer.fill(0xFFFFFFFF, lineStart, lineStart + SCREEN.WIDTH);
       return;
     }
 
@@ -156,50 +161,54 @@ export class GBAPPU {
     const mmu = this.gba.mmu;
     const lineStart = line * SCREEN.WIDTH;
 
+    // === OPTIMIZATION: Direct typed array references ===
+    const palette16 = new Uint16Array(mmu.palette.buffer);
+    const vram8 = mmu.vram;
+    const vram16 = new Uint16Array(mmu.vram.buffer);
+    const oam16 = new Uint16Array(mmu.oam.buffer);
+    const colorLUT = this.colorLUT;
+
     // Clear line buffers (0 = transparent)
     for (let i = 0; i < 5; i++) {
       this.layerBuffer[i].fill(0);
     }
 
-    // Backdrop color (Palette 0)
-    const backdropColor = this.rgb15To32(mmu.read16(0x05000000));
+    // Backdrop color (Palette 0) — direct array access
+    const backdropColor = colorLUT[palette16[0] & 0x7FFF];
 
     // Render Mode 0, 1, 2, 3, 4, 5
     if (mode === 0) {
-      // Text mode: BG0 - BG3
       for (let i = 0; i < 4; i++) {
         if (this.dispcnt & (1 << (8 + i))) {
-          this.renderTextBG(i, line);
+          this.renderTextBG_fast(i, line, vram8, vram16, palette16, colorLUT);
         }
       }
     } else if (mode === 1) {
-      // Mixed: BG0, BG1 Text, BG2 Affine
-      if (this.dispcnt & 0x0100) this.renderTextBG(0, line);
-      if (this.dispcnt & 0x0200) this.renderTextBG(1, line);
-      if (this.dispcnt & 0x0400) this.renderAffineBG(2, line);
+      if (this.dispcnt & 0x0100) this.renderTextBG_fast(0, line, vram8, vram16, palette16, colorLUT);
+      if (this.dispcnt & 0x0200) this.renderTextBG_fast(1, line, vram8, vram16, palette16, colorLUT);
+      if (this.dispcnt & 0x0400) this.renderAffineBG_fast(2, line, vram8, palette16, colorLUT);
     } else if (mode === 2) {
-      // Affine: BG2, BG3
-      if (this.dispcnt & 0x0400) this.renderAffineBG(2, line);
-      if (this.dispcnt & 0x0800) this.renderAffineBG(3, line);
+      if (this.dispcnt & 0x0400) this.renderAffineBG_fast(2, line, vram8, palette16, colorLUT);
+      if (this.dispcnt & 0x0800) this.renderAffineBG_fast(3, line, vram8, palette16, colorLUT);
     } else if (mode === 3) {
       // Bitmap 240x160 16-bit direct color
       if (this.dispcnt & 0x0400) {
-        const vramOffset = line * 240 * 2;
+        const vramOffset = line * 240;
+        const lb = this.layerBuffer[2];
         for (let x = 0; x < 240; x++) {
-          const col = mmu.read16(0x06000000 + vramOffset + x * 2);
-          this.layerBuffer[2][x] = this.rgb15To32(col);
+          lb[x] = colorLUT[vram16[vramOffset + x] & 0x7FFF];
         }
       }
     } else if (mode === 4) {
-      // Bitmap 240x160 8-bit palette indexed (Page 0 or 1)
+      // Bitmap 240x160 8-bit palette indexed
       if (this.dispcnt & 0x0400) {
         const page = (this.dispcnt & 0x0010) ? 0xA000 : 0x0000;
         const vramOffset = page + line * 240;
+        const lb = this.layerBuffer[2];
         for (let x = 0; x < 240; x++) {
-          const palIdx = mmu.read8(0x06000000 + vramOffset + x);
+          const palIdx = vram8[vramOffset + x];
           if (palIdx !== 0) {
-            const col = mmu.read16(0x05000000 + palIdx * 2);
-            this.layerBuffer[2][x] = this.rgb15To32(col);
+            lb[x] = colorLUT[palette16[palIdx] & 0x7FFF];
           }
         }
       }
@@ -207,40 +216,52 @@ export class GBAPPU {
 
     // Render Sprites (OBJ)
     if (this.dispcnt & 0x1000) {
-      this.renderSprites(line);
+      this.renderSprites_fast(line, vram8, palette16, oam16, colorLUT);
     }
 
     // Compose layers with Priority and Backdrop
+    const fb = this.framebuffer;
+    const lb0 = this.layerBuffer[0];
+    const lb1 = this.layerBuffer[1];
+    const lb2 = this.layerBuffer[2];
+    const lb3 = this.layerBuffer[3];
+    const lb4 = this.layerBuffer[4];
+    const dc = this.dispcnt;
+    const bgCnt0 = this.bg[0].cnt & 3;
+    const bgCnt1 = this.bg[1].cnt & 3;
+    const bgCnt2 = this.bg[2].cnt & 3;
+    const bgCnt3 = this.bg[3].cnt & 3;
+    const bg0On = (dc & 0x0100) !== 0;
+    const bg1On = (dc & 0x0200) !== 0;
+    const bg2On = (dc & 0x0400) !== 0;
+    const bg3On = (dc & 0x0800) !== 0;
+
     for (let x = 0; x < SCREEN.WIDTH; x++) {
       let finalColor = backdropColor;
-      let highestPrio = 4;
 
-      // Check layers in priority order (0 to 3)
+      // Check layers in priority order (3 down to 0)
       for (let prio = 3; prio >= 0; prio--) {
-        // Check BGs
-        for (let bgIdx = 3; bgIdx >= 0; bgIdx--) {
-          if ((this.dispcnt & (1 << (8 + bgIdx))) && (this.bg[bgIdx].cnt & 3) === prio) {
-            const c = this.layerBuffer[bgIdx][x];
-            if (c !== 0) {
-              finalColor = c;
-            }
-          }
-        }
+        if (bg3On && bgCnt3 === prio) { const c = lb3[x]; if (c !== 0) finalColor = c; }
+        if (bg2On && bgCnt2 === prio) { const c = lb2[x]; if (c !== 0) finalColor = c; }
+        if (bg1On && bgCnt1 === prio) { const c = lb1[x]; if (c !== 0) finalColor = c; }
+        if (bg0On && bgCnt0 === prio) { const c = lb0[x]; if (c !== 0) finalColor = c; }
+
         // Check OBJ
-        const objCol = this.layerBuffer[4][x];
+        const objCol = lb4[x];
         if (objCol !== 0 && (objCol >>> 24) === (prio + 1)) {
           finalColor = (objCol & 0x00FFFFFF) | 0xFF000000;
         }
       }
 
-      this.framebuffer[lineStart + x] = finalColor;
+      fb[lineStart + x] = finalColor;
     }
   }
 
-  renderTextBG(bgIdx, line) {
+  /** Optimized text BG renderer with direct memory access */
+  renderTextBG_fast(bgIdx, line, vram8, vram16, palette16, colorLUT) {
     const bg = this.bg[bgIdx];
-    const mmu = this.gba.mmu;
     const cnt = bg.cnt;
+    const lb = this.layerBuffer[bgIdx];
 
     const charBase = ((cnt >> 2) & 3) * 0x4000;
     const is256Color = (cnt & 0x80) !== 0;
@@ -257,70 +278,74 @@ export class GBAPPU {
     const tileY = (scrollY >> 3);
     const inTileY = scrollY & 7;
 
+    // Pre-compute map base adjustments for vertical scroll
+    let mapBaseY = screenBase;
+    if (height === 512 && scrollY >= 256) mapBaseY += (width === 512 ? 0x1000 : 0x800);
+
     for (let x = 0; x < SCREEN.WIDTH; x++) {
       const curX = (scrollX + x) % width;
       const tileX = (curX >> 3);
       const inTileX = curX & 7;
 
-      let mapBase = screenBase;
+      let mapBase = mapBaseY;
       if (width === 512 && curX >= 256) mapBase += 0x800;
-      if (height === 512 && scrollY >= 256) mapBase += (width === 512 ? 0x1000 : 0x800);
 
-      const mapOffset = mapBase + ((tileY & 31) * 32 + (tileX & 31)) * 2;
-      const tileEntry = mmu.read16(0x06000000 + mapOffset);
+      const mapOffset = mapBase + ((tileY & 31) * 32 + (tileX & 31));
+      const tileEntry = vram16[mapOffset];
 
       const tileNum = tileEntry & 0x3FF;
       const hFlip = (tileEntry & 0x0400) !== 0;
       const vFlip = (tileEntry & 0x0800) !== 0;
-      const palGroup = (tileEntry >> 12) & 0xF;
 
       const px = hFlip ? (7 - inTileX) : inTileX;
       const py = vFlip ? (7 - inTileY) : inTileY;
 
-      let palIdx = 0;
       if (is256Color) {
         const charOffset = charBase + tileNum * 64 + py * 8 + px;
-        palIdx = mmu.read8(0x06000000 + charOffset);
+        const palIdx = vram8[charOffset];
         if (palIdx !== 0) {
-          const col = mmu.read16(0x05000000 + palIdx * 2);
-          this.layerBuffer[bgIdx][x] = this.rgb15To32(col);
+          lb[x] = colorLUT[palette16[palIdx] & 0x7FFF];
         }
       } else {
+        const palGroup = (tileEntry >> 12) & 0xF;
         const charOffset = charBase + tileNum * 32 + py * 4 + (px >> 1);
-        const byteVal = mmu.read8(0x06000000 + charOffset);
-        palIdx = (px & 1) ? (byteVal >> 4) : (byteVal & 0x0F);
+        const byteVal = vram8[charOffset];
+        const palIdx = (px & 1) ? (byteVal >> 4) : (byteVal & 0x0F);
         if (palIdx !== 0) {
-          const col = mmu.read16(0x05000000 + (palGroup * 16 + palIdx) * 2);
-          this.layerBuffer[bgIdx][x] = this.rgb15To32(col);
+          lb[x] = colorLUT[palette16[palGroup * 16 + palIdx] & 0x7FFF];
         }
       }
     }
   }
 
-  renderAffineBG(bgIdx, line) {
+  /** Optimized affine BG renderer with direct memory access */
+  renderAffineBG_fast(bgIdx, line, vram8, palette16, colorLUT) {
     const bg = this.bg[bgIdx];
-    const mmu = this.gba.mmu;
     const cnt = bg.cnt;
+    const lb = this.layerBuffer[bgIdx];
 
     const charBase = ((cnt >> 2) & 3) * 0x4000;
     const screenBase = ((cnt >> 8) & 0x1F) * 0x800;
-    const sizeShift = 7 + ((cnt >> 14) & 3); // 128, 256, 512, 1024
+    const sizeShift = 7 + ((cnt >> 14) & 3);
     const size = 1 << sizeShift;
     const wrap = (cnt & 0x2000) !== 0;
+    const sizeMask = size - 1;
 
     let xVal = bg.curX;
     let yVal = bg.curY;
+    const pa = bg.pa;
+    const pc = bg.pc;
 
     for (let x = 0; x < SCREEN.WIDTH; x++) {
       let px = xVal >> 8;
       let py = yVal >> 8;
 
-      xVal += bg.pa;
-      yVal += bg.pc;
+      xVal += pa;
+      yVal += pc;
 
       if (wrap) {
-        px = (px & (size - 1));
-        py = (py & (size - 1));
+        px = px & sizeMask;
+        py = py & sizeMask;
       } else if (px < 0 || px >= size || py < 0 || py >= size) {
         continue;
       }
@@ -332,52 +357,61 @@ export class GBAPPU {
 
       const tilesPerRow = size >> 3;
       const mapOffset = screenBase + (tileY * tilesPerRow + tileX);
-      const tileNum = mmu.read8(0x06000000 + mapOffset);
+      const tileNum = vram8[mapOffset];
 
       const charOffset = charBase + tileNum * 64 + inTileY * 8 + inTileX;
-      const palIdx = mmu.read8(0x06000000 + charOffset);
+      const palIdx = vram8[charOffset];
       if (palIdx !== 0) {
-        const col = mmu.read16(0x05000000 + palIdx * 2);
-        this.layerBuffer[bgIdx][x] = this.rgb15To32(col);
+        lb[x] = colorLUT[palette16[palIdx] & 0x7FFF];
       }
     }
   }
 
-  renderSprites(line) {
-    const mmu = this.gba.mmu;
+  /** Optimized sprite renderer with direct memory access and early culling */
+  renderSprites_fast(line, vram8, palette16, oam16, colorLUT) {
     const is1DMapping = (this.dispcnt & 0x0040) !== 0;
+    const lb = this.layerBuffer[4];
 
-    // Scan all 128 OAM entries
+    const SIZES = [
+      [[8,8],[16,16],[32,32],[64,64]],
+      [[16,8],[32,8],[32,16],[64,32]],
+      [[8,16],[8,32],[16,32],[32,64]]
+    ];
+
+    // OBJ sprite VRAM starts at 0x10000 in VRAM
+    const sprVram = vram8;
+    const sprVramBase = 0x10000;
+    // OBJ palette at palette[256..511] = index 128..255 in 16-bit array
+    const objPal16Offset = 256; // 0x200 / 2
+
+    // Scan all 128 OAM entries (reverse for priority)
     for (let i = 127; i >= 0; i--) {
-      const oamOffset = 0x07000000 + i * 8;
-      const attr0 = mmu.read16(oamOffset + 0);
-      const attr1 = mmu.read16(oamOffset + 2);
-      const attr2 = mmu.read16(oamOffset + 4);
+      const oamBase = i * 4; // 4 x uint16 per entry
+      const attr0 = oam16[oamBase];
+      const attr1 = oam16[oamBase + 1];
+      const attr2 = oam16[oamBase + 2];
 
       const isRotScale = (attr0 & 0x0100) !== 0;
       const isHidden = !isRotScale && ((attr0 & 0x0200) !== 0);
       if (isHidden) continue;
 
       const shape = (attr0 >> 14) & 3;
+      if (shape >= 3) continue;
       const sizeMode = (attr1 >> 14) & 3;
 
-      let sprWidth = 8, sprHeight = 8;
-      const SIZES = [
-        [[8,8],[16,16],[32,32],[64,64]],       // Square
-        [[16,8],[32,8],[32,16],[64,32]],      // Horizontal
-        [[8,16],[8,32],[16,32],[32,64]]       // Vertical
-      ];
-      if (shape < 3) {
-        [sprWidth, sprHeight] = SIZES[shape][sizeMode];
-      }
+      const [sprWidth, sprHeight] = SIZES[shape][sizeMode];
 
       let y = attr0 & 0xFF;
       if (y >= 160) y -= 256;
 
+      // Early scanline culling
+      if (line < y || line >= y + sprHeight) continue;
+
       let x = attr1 & 0x1FF;
       if (x >= 240) x -= 512;
 
-      if (line < y || line >= y + sprHeight) continue;
+      // Early x culling - skip if entirely off screen
+      if (x + sprWidth <= 0 || x >= 240) continue;
 
       const inSprY = (line - y);
       const is256Color = (attr0 & 0x2000) !== 0;
@@ -385,43 +419,43 @@ export class GBAPPU {
       const vFlip = !isRotScale && ((attr1 & 0x2000) !== 0);
       const priority = (attr2 >> 10) & 3;
       const palGroup = (attr2 >> 12) & 0xF;
-      let baseTile = attr2 & 0x3FF;
+      const baseTile = attr2 & 0x3FF;
 
       const py = vFlip ? (sprHeight - 1 - inSprY) : inSprY;
       const tileRow = py >> 3;
       const inTileY = py & 7;
+      const prioTag = (priority + 1) << 24;
 
-      for (let sprX = 0; sprX < sprWidth; sprX++) {
+      // Clamp loop to visible range
+      const startX = Math.max(0, -x);
+      const endX = Math.min(sprWidth, 240 - x);
+
+      for (let sprX = startX; sprX < endX; sprX++) {
         const screenX = x + sprX;
-        if (screenX < 0 || screenX >= SCREEN.WIDTH) continue;
 
         const px = hFlip ? (sprWidth - 1 - sprX) : sprX;
         const tileCol = px >> 3;
         const inTileX = px & 7;
 
-        let curTile = 0;
+        let curTile;
         if (is1DMapping) {
           curTile = baseTile + (tileRow * (sprWidth >> 3) + tileCol) * (is256Color ? 2 : 1);
         } else {
           curTile = baseTile + (tileRow * 32 + tileCol);
         }
 
-        let palIdx = 0;
         if (is256Color) {
-          const offset = 0x06010000 + (curTile * 32) + (inTileY * 8) + inTileX;
-          palIdx = mmu.read8(offset);
+          const offset = sprVramBase + (curTile * 32) + (inTileY * 8) + inTileX;
+          const palIdx = sprVram[offset];
           if (palIdx !== 0) {
-            const col = mmu.read16(0x05000200 + palIdx * 2);
-            // Store priority in alpha upper byte: (priority + 1)
-            this.layerBuffer[4][screenX] = ((priority + 1) << 24) | (this.rgb15To32(col) & 0x00FFFFFF);
+            lb[screenX] = prioTag | (colorLUT[palette16[objPal16Offset + palIdx] & 0x7FFF] & 0x00FFFFFF);
           }
         } else {
-          const offset = 0x06010000 + (curTile * 32) + (inTileY * 4) + (inTileX >> 1);
-          const byteVal = mmu.read8(offset);
-          palIdx = (inTileX & 1) ? (byteVal >> 4) : (byteVal & 0x0F);
+          const offset = sprVramBase + (curTile * 32) + (inTileY * 4) + (inTileX >> 1);
+          const byteVal = sprVram[offset];
+          const palIdx = (inTileX & 1) ? (byteVal >> 4) : (byteVal & 0x0F);
           if (palIdx !== 0) {
-            const col = mmu.read16(0x05000200 + (palGroup * 16 + palIdx) * 2);
-            this.layerBuffer[4][screenX] = ((priority + 1) << 24) | (this.rgb15To32(col) & 0x00FFFFFF);
+            lb[screenX] = prioTag | (colorLUT[palette16[objPal16Offset + palGroup * 16 + palIdx] & 0x7FFF] & 0x00FFFFFF);
           }
         }
       }

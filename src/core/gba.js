@@ -15,6 +15,9 @@ export class GBA {
     this.ctx = canvas ? canvas.getContext('2d', { alpha: false }) : null;
     this.imageData = this.ctx ? this.ctx.createImageData(SCREEN.WIDTH, SCREEN.HEIGHT) : null;
 
+    // Pre-create 32-bit view for fast framebuffer copy
+    this.imageData32 = this.imageData ? new Uint32Array(this.imageData.data.buffer) : null;
+
     // Subsystems
     this.interrupts = new GBAInterrupts(this);
     this.mmu = new GBAMMU(this);
@@ -44,6 +47,14 @@ export class GBA {
     this.lastFpsTime = performance.now();
     this.onFpsUpdate = null;
 
+    // Frame skipping
+    this.frameSkipEnabled = true;
+    this.frameSkipCounter = 0;
+    this.autoFrameSkip = 0; // 0 = no skip, 1 = skip every other, 2 = skip 2 of 3...
+
+    // Freeze list for memory scanner
+    this.freezeList = [];
+
     // Rewind buffer (last 300 frames ~ 5 seconds)
     this.rewindHistory = [];
     this.maxRewindFrames = 300;
@@ -62,6 +73,7 @@ export class GBA {
     this.romLoaded = true;
 
     this.cheats.loadFromStorage();
+    this.loadFreezeList();
     this.reset();
     this.start();
   }
@@ -93,6 +105,8 @@ export class GBA {
     this.dma.reset();
     this.timers.reset();
     this.rewindHistory = [];
+    this.frameSkipCounter = 0;
+    this.autoFrameSkip = 0;
   }
 
   start() {
@@ -146,6 +160,17 @@ export class GBA {
         this.framesCount = 0;
         this.lastFpsTime = now;
         if (this.onFpsUpdate) this.onFpsUpdate(this.fps);
+
+        // Auto frame-skip: if FPS < 45, enable skip
+        if (this.frameSkipEnabled) {
+          if (this.fps < 30) {
+            this.autoFrameSkip = 2; // skip 2 of 3 frames
+          } else if (this.fps < 45) {
+            this.autoFrameSkip = 1; // skip every other
+          } else {
+            this.autoFrameSkip = 0;
+          }
+        }
       }
     }
 
@@ -153,27 +178,48 @@ export class GBA {
   }
 
   runFrame() {
-    // 280,896 CPU cycles per frame
-    let cyclesRemaining = SCREEN.CYCLES_PER_FRAME;
-
     // Apply Cheats every frame
     this.cheats.applyCheats();
 
-    while (cyclesRemaining > 0) {
-      const stepCycles = this.cpu.step();
-      cyclesRemaining -= stepCycles;
+    // Apply freeze list every frame
+    this.applyFreezes();
 
-      this.ppu.step(stepCycles);
-      this.timers.step(stepCycles);
-      this.apu.step(stepCycles);
+    // Determine if we should skip rendering this frame
+    let skipRender = false;
+    if (this.autoFrameSkip > 0 && this.fastForward) {
+      this.frameSkipCounter++;
+      if (this.frameSkipCounter % (this.autoFrameSkip + 1) !== 0) {
+        skipRender = true;
+      }
+    }
+
+    // Run 280,896 CPU cycles per frame
+    let cyclesRemaining = SCREEN.CYCLES_PER_FRAME;
+
+    if (skipRender) {
+      // Run CPU only, skip PPU rendering (still step for timing)
+      while (cyclesRemaining > 0) {
+        const stepCycles = this.cpu.step();
+        cyclesRemaining -= stepCycles;
+        this.ppu.step(stepCycles);
+        this.timers.step(stepCycles);
+        // Skip APU during frame-skip for speed
+      }
+    } else {
+      while (cyclesRemaining > 0) {
+        const stepCycles = this.cpu.step();
+        cyclesRemaining -= stepCycles;
+        this.ppu.step(stepCycles);
+        this.timers.step(stepCycles);
+        this.apu.step(stepCycles);
+      }
     }
   }
 
   onFrameComplete(framebuffer) {
-    if (this.ctx && this.imageData) {
-      // Put 32-bit pixel data directly into Canvas ImageData
-      const data32 = new Uint32Array(this.imageData.data.buffer);
-      data32.set(framebuffer);
+    if (this.ctx && this.imageData32) {
+      // Direct 32-bit copy — faster than going through imageData.data
+      this.imageData32.set(framebuffer);
       this.ctx.putImageData(this.imageData, 0, 0);
     }
 
@@ -189,6 +235,45 @@ export class GBA {
 
   setKeyUp(keyBit) {
     this.mmu.keyState |= (1 << keyBit);
+  }
+
+  // === Freeze List (Memory Scanner) ===
+  applyFreezes() {
+    const mmu = this.mmu;
+    for (const f of this.freezeList) {
+      if (f.dataType === 'u8') mmu.write8(f.address, f.value & 0xFF);
+      else if (f.dataType === 'u16') mmu.write16(f.address, f.value & 0xFFFF);
+      else if (f.dataType === 'u32') mmu.write32(f.address, f.value >>> 0);
+    }
+  }
+
+  addFreeze(address, value, dataType) {
+    // Remove existing freeze at same address
+    this.freezeList = this.freezeList.filter(f => f.address !== address);
+    this.freezeList.push({ address, value, dataType });
+    this.saveFreezeList();
+  }
+
+  removeFreeze(address) {
+    this.freezeList = this.freezeList.filter(f => f.address !== address);
+    this.saveFreezeList();
+  }
+
+  saveFreezeList() {
+    try {
+      const key = 'myboy_freezes_' + (this.romTitle || 'default');
+      localStorage.setItem(key, JSON.stringify(this.freezeList));
+    } catch (e) {}
+  }
+
+  loadFreezeList() {
+    try {
+      const key = 'myboy_freezes_' + (this.romTitle || 'default');
+      const data = localStorage.getItem(key);
+      this.freezeList = data ? JSON.parse(data) : [];
+    } catch (e) {
+      this.freezeList = [];
+    }
   }
 
   // Save State

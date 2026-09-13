@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>My Boy! GBA - Trình Giả Lập Game Boy Advance</title>
-  <meta name="description" content="Trình giả lập Game Boy Advance (GBA) chuẩn phong cách My Boy! hỗ trợ load ROM .gba, Save State, Fast-Forward, Cheats và Shaders." />
+  <meta name="description" content="Trình giả lập Game Boy Advance (GBA) chuẩn phong cách My Boy! hỗ trợ load ROM .gba, Save State, Fast-Forward, Cheats, Memory Scanner và Shaders." />
   <meta name="theme-color" content="#0c0d14" />
   <link rel="stylesheet" href="/src/styles/style.css" />
 </head>
@@ -14,18 +14,33 @@
     <header class="top-toolbar">
       <div class="brand">
         <div class="logo-icon">MB</div>
-        <span>My Boy!</span>
+        <span class="brand-title">My Boy!</span>
+        <div class="game-title-badge" id="current-rom-name">Chưa tải ROM</div>
       </div>
 
-      <div class="game-title-badge" id="current-rom-name">Chưa tải ROM</div>
+      <div class="tool-actions-wrapper">
+        <!-- Hamburger Toggle Button -->
+        <button class="tool-btn hamburger-btn" id="btn-hamburger" title="Mở Menu">☰</button>
 
-      <div class="tool-buttons">
-        <div class="fps-badge" id="fps-counter">60 FPS</div>
-        <button class="tool-btn" id="btn-fastforward" title="Tua nhanh (Tab / ⚡)">⚡ <span id="ff-label">2x</span></button>
-        <button class="tool-btn" id="btn-open-states" title="Save/Load States">💾</button>
-        <button class="tool-btn" id="btn-open-cheats" title="Mã gian lận">👾</button>
-        <button class="tool-btn" id="btn-open-settings" title="Cài đặt">⚙️</button>
-        <button class="tool-btn" id="btn-open-library" title="Thư viện ROM">📁</button>
+        <!-- Dropdown Menu -->
+        <div class="dropdown-menu" id="hamburger-dropdown">
+          <button class="menu-item ff-menu-item" id="btn-fastforward">
+            <span style="display:flex; align-items:center; gap:8px;">⚡ <span>Tua Nhanh</span></span>
+            <span class="ff-badge" id="ff-label">2x</span>
+          </button>
+          <div class="menu-divider"></div>
+          <button class="menu-item" id="menu-item-library">📁 <span>Thư viện ROM</span></button>
+          <button class="menu-item" id="menu-item-states">💾 <span>Save / Load State</span></button>
+          <button class="menu-item" id="menu-item-cheats">👾 <span>Mã Gian Lận (Cheats)</span></button>
+          <button class="menu-item" id="menu-item-scanner">🔍 <span>Tìm & Chỉnh Bộ Nhớ</span></button>
+          <button class="menu-item" id="menu-item-keybinds">⌨️ <span>Cài Đặt Phím Bấm PC</span></button>
+          <button class="menu-item" id="menu-item-settings">⚙️ <span>Cài Đặt Hệ Thống</span></button>
+          <div class="menu-divider"></div>
+          <div class="menu-footer-item">
+            <span style="font-size:0.8rem; color:var(--text-dim);">Tốc độ khung hình:</span>
+            <div class="fps-badge" id="fps-counter">60 FPS</div>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -45,14 +60,14 @@
           <canvas id="gba-screen" width="240" height="160"></canvas>
         </div>
 
-        <!-- L & R Shoulder Buttons -->
+        <!-- L & R Shoulder Buttons (Portrait) -->
         <div class="shoulder-container">
           <button class="btn-shoulder" id="btn-l" aria-label="Button L">L</button>
           <button class="btn-shoulder" id="btn-r" aria-label="Button R">R</button>
         </div>
       </section>
 
-      <!-- Lower Controls -->
+      <!-- Lower Controls Area -->
       <section class="controls-area">
         <!-- Virtual D-Pad -->
         <div class="dpad-container">
@@ -69,6 +84,18 @@
           </div>
         </div>
 
+        <!-- Center Controls (Select / Start) -->
+        <div class="center-controls">
+          <div class="pill-button">
+            <button class="btn-pill" id="btn-select" aria-label="Select"></button>
+            <span class="pill-label">SELECT</span>
+          </div>
+          <div class="pill-button">
+            <button class="btn-pill" id="btn-start" aria-label="Start"></button>
+            <span class="pill-label">START</span>
+          </div>
+        </div>
+
         <!-- Action Buttons (A, B, Turbo) -->
         <div class="action-buttons-container">
           <div class="turbo-row">
@@ -82,18 +109,6 @@
           </div>
         </div>
       </section>
-
-      <!-- Center Controls (Select / Start) -->
-      <div class="center-controls">
-        <div class="pill-button">
-          <button class="btn-pill" id="btn-select" aria-label="Select"></button>
-          <span class="pill-label">SELECT</span>
-        </div>
-        <div class="pill-button">
-          <button class="btn-pill" id="btn-start" aria-label="Start"></button>
-          <span class="pill-label">START</span>
-        </div>
-      </div>
     </main>
 
     <!-- Modal: ROM Library -->
@@ -115,7 +130,12 @@
             <button class="btn-play-rom" id="btn-load-demo" style="flex: 1; padding: 10px;">🎮 Chơi Game Mẫu (Demo GBA)</button>
           </div>
 
-          <h4 style="font-size: 0.9rem; color: var(--text-dim); margin-top: 8px;">ROM ĐÃ TẢI LÊN TRÊN THIẾT BỊ:</h4>
+          <h4 style="font-size: 0.9rem; color: var(--accent-cyan); margin-top: 6px;">📂 GAME CÓ SẴN TRONG THƯ MỤC /game:</h4>
+          <div id="preloaded-games-list" style="display: flex; flex-direction: column; gap: 8px;">
+            <!-- Rendered by JS -->
+          </div>
+
+          <h4 style="font-size: 0.9rem; color: var(--text-dim); margin-top: 8px;">ROM ĐÃ TẢI LÊN TỪ THIẾT BỊ:</h4>
           <div id="rom-library-list" style="display: flex; flex-direction: column; gap: 8px;">
             <!-- Rendered by JS -->
           </div>
@@ -147,7 +167,7 @@
     <div class="modal-backdrop" id="modal-cheats">
       <div class="modal-dialog">
         <div class="modal-header">
-          <h3>👾 Quản lý Cheat Codes</h3>
+          <h3>👾 Quản lý Cheat Codes (GameShark / RAW)</h3>
           <button class="btn-close-modal" data-close="modal-cheats">✕</button>
         </div>
         <div class="modal-content">
@@ -159,6 +179,73 @@
           <h4 style="font-size: 0.9rem; color: var(--text-dim); margin-top: 8px;">DANH SÁCH MÃ ĐANG ÁP DỤNG:</h4>
           <div id="cheats-list" style="display: flex; flex-direction: column; gap: 8px;">
             <!-- Rendered by JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Memory Scanner (Cheat Search) -->
+    <div class="modal-backdrop" id="modal-scanner">
+      <div class="modal-dialog scanner-dialog">
+        <div class="modal-header">
+          <h3>🔍 Tìm & Chỉnh Giá Trị Game (Memory Scanner)</h3>
+          <button class="btn-close-modal" data-close="modal-scanner">✕</button>
+        </div>
+        <div class="modal-content">
+          <div class="scanner-controls-card">
+            <div class="scanner-input-row">
+              <label>Kiểu dữ liệu:</label>
+              <select id="scanner-datatype" class="setting-select" style="max-width: 140px;">
+                <option value="u8">8-bit (0-255)</option>
+                <option value="u16" selected>16-bit (0-65535)</option>
+                <option value="u32">32-bit (0-4.2 tỷ)</option>
+              </select>
+            </div>
+
+            <div class="scanner-search-row">
+              <input type="number" id="scanner-value-input" placeholder="Nhập giá trị cần tìm (vd: HP, Tiền)" class="scanner-input" />
+              <div class="scanner-btn-group">
+                <button class="btn-play-rom" id="btn-scanner-first">Tìm Mới</button>
+                <button class="tool-btn" id="btn-scanner-next" disabled>Lọc Tiếp</button>
+                <button class="tool-btn btn-danger" id="btn-scanner-reset">Đặt Lại</button>
+              </div>
+            </div>
+
+            <div class="scanner-status-text" id="scanner-status">
+              Nhập giá trị hiện tại của thông số game rồi bấm "Tìm Mới"
+            </div>
+          </div>
+
+          <h4 style="font-size: 0.9rem; color: var(--text-dim); margin-top: 10px;">KẾT QUẢ TÌM THẤY (<span id="scanner-result-count">0</span>):</h4>
+          <div class="scanner-results-container" id="scanner-results-list">
+            <!-- Rendered by JS -->
+            <div style="text-align: center; color: var(--text-dim); padding: 16px;">Chưa có kết quả tìm kiếm nào</div>
+          </div>
+
+          <h4 style="font-size: 0.9rem; color: var(--accent-cyan); margin-top: 10px;">ĐỊA CHỈ ĐANG ĐÓNG BĂNG (KHÔNG GIẢM):</h4>
+          <div id="scanner-frozen-list" style="display: flex; flex-direction: column; gap: 6px;">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Key Bindings (PC) -->
+    <div class="modal-backdrop" id="modal-keybinds">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3>⌨️ Gán Phím Bấm Máy Tính (PC)</h3>
+          <button class="btn-close-modal" data-close="modal-keybinds">✕</button>
+        </div>
+        <div class="modal-content">
+          <p style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 12px;">
+            Nhấn vào nút bên cạnh phím GBA tương ứng, sau đó nhấn phím bất kỳ trên bàn phím của bạn để gán.
+          </p>
+          <div class="keybind-grid" id="keybind-grid">
+            <!-- Rendered dynamically by JS -->
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 14px;">
+            <button class="tool-btn btn-danger" id="btn-reset-keys" style="flex: 1;">↺ Đặt lại mặc định</button>
           </div>
         </div>
       </div>
@@ -200,16 +287,6 @@
           <div class="setting-group">
             <label>📳 Rung phản hồi (Haptic):</label>
             <input type="checkbox" id="setting-haptic" checked style="transform: scale(1.3); accent-color: var(--accent-cyan);" />
-          </div>
-
-          <div class="setting-group">
-            <label>⌨️ Hướng dẫn phím máy tính:</label>
-            <small style="color: var(--text-dim); text-align: right;">
-              A: Z/J | B: X/K<br/>
-              L: A/Q | R: S/E<br/>
-              Start: Enter | Select: Space<br/>
-              Fast-Forward: Tab
-            </small>
           </div>
         </div>
       </div>

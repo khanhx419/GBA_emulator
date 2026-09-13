@@ -19,7 +19,7 @@ android/captures/
 android/.idea/
 *.apk
 *.aab
-!MyBoy-GBA-Emulator.apk
+!MyBoy_GBA_Emulator.apk
 
 # Editor / OS
 .DS_Store

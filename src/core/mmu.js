@@ -51,15 +51,35 @@ export class GBAMMU {
   }
 
   detectSaveType() {
-    // Search ROM for save type string
-    const text = new TextDecoder('ascii').decode(this.rom);
-    if (text.includes('FLASH1M_V') || text.includes('FLASH_V128') || text.includes('FLASH1M')) {
+    // Fast byte sequence search in ROM binary without decoding 32MB string
+    const rom = this.rom;
+    const findAscii = (str) => {
+      const len = str.length;
+      const b0 = str.charCodeAt(0);
+      const b1 = str.charCodeAt(1);
+      const limit = rom.length - len;
+      for (let i = 0; i <= limit; i += 4) {
+        if (rom[i] === b0 && rom[i + 1] === b1) {
+          let matched = true;
+          for (let j = 2; j < len; j++) {
+            if (rom[i + j] !== str.charCodeAt(j)) {
+              matched = false;
+              break;
+            }
+          }
+          if (matched) return true;
+        }
+      }
+      return false;
+    };
+
+    if (findAscii('FLASH1M_V') || findAscii('FLASH_V128') || findAscii('FLASH1M')) {
       this.saveType = 'FLASH128';
       this.saveData = new Uint8Array(MEMORY.FLASH_128_SIZE);
-    } else if (text.includes('FLASH_V') || text.includes('FLASH512_V') || text.includes('FLASH')) {
+    } else if (findAscii('FLASH512_V') || findAscii('FLASH_V') || findAscii('FLASH')) {
       this.saveType = 'FLASH64';
       this.saveData = new Uint8Array(MEMORY.FLASH_64_SIZE);
-    } else if (text.includes('EEPROM_V')) {
+    } else if (findAscii('EEPROM_V') || findAscii('EEPROM')) {
       this.saveType = 'EEPROM';
       this.saveData = new Uint8Array(MEMORY.EEPROM_8K_SIZE);
     } else {

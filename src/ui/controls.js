@@ -1,5 +1,25 @@
 import { KEYS } from '../core/gba-constants.js';
 
+export const DEFAULT_KEY_MAP = {
+  'KeyZ': KEYS.A,
+  'KeyJ': KEYS.A,
+  'KeyX': KEYS.B,
+  'KeyK': KEYS.B,
+  'KeyA': KEYS.L,
+  'KeyQ': KEYS.L,
+  'KeyS': KEYS.R,
+  'KeyE': KEYS.R,
+  'Enter': KEYS.START,
+  'Space': KEYS.SELECT,
+  'ShiftRight': KEYS.SELECT,
+  'ArrowUp': KEYS.UP,
+  'KeyW': KEYS.UP,
+  'ArrowDown': KEYS.DOWN,
+  'ArrowLeft': KEYS.LEFT,
+  'KeyD': KEYS.RIGHT,
+  'ArrowRight': KEYS.RIGHT
+};
+
 export class GBAControls {
   constructor(gba) {
     this.gba = gba;
@@ -7,31 +27,52 @@ export class GBAControls {
     this.turboBInterval = null;
     this.hapticsEnabled = true;
 
-    // Default Keyboard Map
-    this.keyMap = {
-      'KeyZ': KEYS.A,
-      'KeyJ': KEYS.A,
-      'KeyX': KEYS.B,
-      'KeyK': KEYS.B,
-      'KeyA': KEYS.L,
-      'KeyQ': KEYS.L,
-      'KeyS': KEYS.R,
-      'KeyE': KEYS.R,
-      'Enter': KEYS.START,
-      'Space': KEYS.SELECT,
-      'ShiftRight': KEYS.SELECT,
-      'ArrowUp': KEYS.UP,
-      'KeyW': KEYS.UP,
-      'ArrowDown': KEYS.DOWN,
-      '//KeyS': KEYS.DOWN, // avoid clash with R
-      'ArrowLeft': KEYS.LEFT,
-      'KeyD': KEYS.RIGHT,
-      'ArrowRight': KEYS.RIGHT
-    };
+    // Load custom key bindings or fallback to default
+    this.keyMap = this.loadKeyMap();
 
     this.initKeyboard();
     this.initTouchControls();
     this.initGamepad();
+  }
+
+  loadKeyMap() {
+    try {
+      const saved = localStorage.getItem('myboy_key_bindings');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {}
+    return { ...DEFAULT_KEY_MAP };
+  }
+
+  saveKeyMap() {
+    try {
+      localStorage.setItem('myboy_key_bindings', JSON.stringify(this.keyMap));
+    } catch (e) {}
+  }
+
+  resetKeyMap() {
+    this.keyMap = { ...DEFAULT_KEY_MAP };
+    this.saveKeyMap();
+  }
+
+  // Set key code for a specific GBA button bit
+  setKeyBinding(keyCode, gbaKeyBit) {
+    // Remove existing binding for this code
+    delete this.keyMap[keyCode];
+    this.keyMap[keyCode] = gbaKeyBit;
+    this.saveKeyMap();
+  }
+
+  // Get current key codes mapped to a GBA button
+  getKeysForButton(gbaKeyBit) {
+    const keys = [];
+    for (const [code, bit] of Object.entries(this.keyMap)) {
+      if (bit === gbaKeyBit) {
+        keys.push(code);
+      }
+    }
+    return keys;
   }
 
   triggerHaptic() {
@@ -227,7 +268,7 @@ export class GBAControls {
         state = !state;
         if (state) this.gba.setKeyDown(keyBit);
         else this.gba.setKeyUp(keyBit);
-      }, 33); // ~30 times per second
+      }, 33);
     };
 
     const stopTurbo = (e) => {
@@ -260,14 +301,6 @@ export class GBAControls {
       const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
       const gp = gamepads[0];
       if (gp) {
-        // Standard mapping:
-        // 0: A (B button on GBA or A)
-        // 1: B
-        // 8: Select (Back/Share)
-        // 9: Start (Options/Menu)
-        // 4: L1 (L trigger)
-        // 5: R1 (R trigger)
-        // 12: Dpad Up, 13: Dpad Down, 14: Dpad Left, 15: Dpad Right
         if (gp.buttons[0]?.pressed) this.gba.setKeyDown(KEYS.A); else this.gba.setKeyUp(KEYS.A);
         if (gp.buttons[1]?.pressed) this.gba.setKeyDown(KEYS.B); else this.gba.setKeyUp(KEYS.B);
         if (gp.buttons[4]?.pressed) this.gba.setKeyDown(KEYS.L); else this.gba.setKeyUp(KEYS.L);
