@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+dist-ssr/
+*.local
+
+# Android Gradle
+.gradle/
+build/
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/captures/
+android/.idea/
+*.apk
+*.aab
+!MyBoy-GBA-Emulator.apk
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

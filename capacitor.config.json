@@ -1,0 +1,17 @@
+{
+  "appId": "com.antigravity.myboygba",
+  "appName": "My Boy! GBA",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "backgroundColor": "#0c0d14",
+    "overrideUserAgent": "MyBoyGBA-Android"
+  },
+  "plugins": {
+    "CapacitorCookies": {
+      "enabled": true
+    }
+  }
+}
