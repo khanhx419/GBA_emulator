@@ -3,7 +3,7 @@
 export class GBAShaders {
   constructor(canvasContainer) {
     this.container = canvasContainer;
-    this.currentFilter = 'lcd'; // 'pixel', 'lcd', 'crt', 'vivid'
+    this.currentFilter = 'pixel'; // 'pixel', 'lcd', 'crt', 'vivid'
     this.setFilter(this.currentFilter);
   }
 

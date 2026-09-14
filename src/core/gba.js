@@ -1,33 +1,18 @@
-import { SCREEN, KEYS } from './gba-constants.js';
-import { ARM7TDMI } from './arm7tdmi.js';
-import { GBAMMU } from './mmu.js';
-import { GBAPPU } from './ppu.js';
-import { GBAAPU } from './apu.js';
-import { GBADMA } from './dma.js';
-import { GBATimers } from './timers.js';
-import { GBAInterrupts } from './interrupts.js';
-import { GBABios } from './bios.js';
+import GameBoyAdvance from './engine/gba.js';
 import { GBACheats } from './cheats.js';
 
 export class GBA {
   constructor(canvas) {
     this.canvas = canvas;
-    this.ctx = canvas ? canvas.getContext('2d', { alpha: false }) : null;
-    this.imageData = this.ctx ? this.ctx.createImageData(SCREEN.WIDTH, SCREEN.HEIGHT) : null;
+    this.core = new GameBoyAdvance();
 
-    // Pre-create 32-bit view for fast framebuffer copy
-    this.imageData32 = this.imageData ? new Uint32Array(this.imageData.data.buffer) : null;
+    if (canvas) {
+      this.core.setCanvasDirect(canvas);
+    }
 
-    // Subsystems
-    this.interrupts = new GBAInterrupts(this);
-    this.mmu = new GBAMMU(this);
-    this.cpu = new ARM7TDMI(this);
-    this.ppu = new GBAPPU(this);
-    this.apu = new GBAAPU(this);
-    this.dma = new GBADMA(this);
-    this.timers = new GBATimers(this);
-    this.bios = new GBABios(this);
+    // Subsystem bridges for Cheats & Memory Scanner
     this.cheats = new GBACheats(this);
+    this.mmu = this.createMmuBridge();
 
     // Run state
     this.running = false;
@@ -47,74 +32,117 @@ export class GBA {
     this.lastFpsTime = performance.now();
     this.onFpsUpdate = null;
 
-    // Frame skipping
-    this.frameSkipEnabled = true;
-    this.frameSkipCounter = 0;
-    this.autoFrameSkip = 0; // 0 = no skip, 1 = skip every other, 2 = skip 2 of 3...
-
     // Freeze list for memory scanner
     this.freezeList = [];
 
-    // Rewind buffer (last 300 frames ~ 5 seconds)
-    this.rewindHistory = [];
-    this.maxRewindFrames = 300;
-
     this.rafId = null;
     this.lastFrameTime = performance.now();
+    this.accumulator = 0;
 
-    // Callbacks
-    this.onFrameCallback = null;
+    // Load BIOS stub if available
+    this.loadBios();
+  }
+
+  async loadBios() {
+    try {
+      const resp = await fetch('/bios.bin');
+      if (resp.ok) {
+        const biosBuf = await resp.arrayBuffer();
+        this.biosBuffer = biosBuf;
+        this.core.setBios(biosBuf);
+      }
+    } catch (e) {
+      console.warn('Using built-in BIOS emulator');
+    }
+  }
+
+  createMmuBridge() {
+    const core = this.core;
+    return {
+      get rom() { 
+        if (core.rom && core.rom.memory) {
+          return new Uint8Array(core.rom.memory.buffer || core.rom.memory);
+        }
+        return new Uint8Array(0);
+      },
+      get romSize() { 
+        if (core.rom && core.rom.memory) {
+          return core.rom.memory.byteLength || (core.rom.memory.buffer ? core.rom.memory.buffer.byteLength : 0);
+        }
+        return 0;
+      },
+      get ewram() {
+        return core.mmu.memory[core.mmu.REGION_WORKING_RAM] 
+          ? new Uint8Array(core.mmu.memory[core.mmu.REGION_WORKING_RAM].buffer) 
+          : new Uint8Array(0x40000);
+      },
+      get iwram() {
+        return core.mmu.memory[core.mmu.REGION_WORKING_IRAM]
+          ? new Uint8Array(core.mmu.memory[core.mmu.REGION_WORKING_IRAM].buffer)
+          : new Uint8Array(0x8000);
+      },
+      read8(addr) { return core.mmu.load8(addr); },
+      read16(addr) { return core.mmu.load16(addr); },
+      read32(addr) { return core.mmu.load32(addr); },
+      write8(addr, val) { core.mmu.store8(addr, val); },
+      write16(addr, val) { core.mmu.store16(addr, val); },
+      write32(addr, val) { core.mmu.store32(addr, val); },
+      get saveData() {
+        if (core.mmu.save) {
+          return new Uint8Array(core.mmu.save.buffer);
+        }
+        return new Uint8Array(0);
+      }
+    };
+  }
+
+  get apu() {
+    const core = this.core;
+    return {
+      setVolume(v) {
+        if (core.audio) core.audio.masterVolume = Math.max(0, Math.min(1, v));
+      }
+    };
   }
 
   loadRom(arrayBuffer, fileName = 'game.gba') {
     this.romName = fileName;
-    this.mmu.loadRom(arrayBuffer);
-    this.romTitle = this.extractRomTitle();
+    
+    // Convert ArrayBuffer to Uint8Array/Buffer for gbajs
+    const success = this.core.setRom(arrayBuffer);
+    if (!success) {
+      console.error('Failed to load ROM in gbajs');
+      return false;
+    }
+
+    // Re-apply BIOS after setRom->reset->clear reinitializes memory
+    if (this.biosBuffer) {
+      this.core.setBios(this.biosBuffer);
+    }
+
+    this.romTitle = (this.core.rom && this.core.rom.title) ? this.core.rom.title.trim() : this.romName.replace(/\.[^/.]+$/, '');
     this.romLoaded = true;
 
     this.cheats.loadFromStorage();
     this.loadFreezeList();
-    this.reset();
     this.start();
-  }
-
-  extractRomTitle() {
-    if (this.mmu.rom.length >= 0xB0) {
-      let title = '';
-      for (let i = 0xA0; i < 0xAC; i++) {
-        const charCode = this.mmu.rom[i];
-        if (charCode >= 32 && charCode <= 126) {
-          title += String.fromCharCode(charCode);
-        }
-      }
-      return title.trim() || this.romName.replace(/\.[^/.]+$/, '');
-    }
-    return this.romName.replace(/\.[^/.]+$/, '');
+    return true;
   }
 
   getRomTitle() {
-    return this.romTitle;
+    return this.romTitle || this.romName.replace(/\.[^/.]+$/, '');
   }
 
   reset() {
-    this.interrupts.reset();
-    this.mmu.reset();
-    this.cpu.reset();
-    this.ppu.reset();
-    this.apu.reset();
-    this.dma.reset();
-    this.timers.reset();
-    this.rewindHistory = [];
-    this.frameSkipCounter = 0;
-    this.autoFrameSkip = 0;
+    this.core.reset();
   }
 
   start() {
     if (!this.romLoaded) return;
     this.running = true;
     this.paused = false;
-    this.apu.initAudioContext();
     this.lastFrameTime = performance.now();
+    this.accumulator = 0;
     this.scheduleNextFrame();
   }
 
@@ -130,6 +158,7 @@ export class GBA {
     if (this.romLoaded && this.paused) {
       this.paused = false;
       this.lastFrameTime = performance.now();
+      this.accumulator = 0;
       this.scheduleNextFrame();
     }
   }
@@ -145,33 +174,39 @@ export class GBA {
   loop(now) {
     if (!this.running || this.paused) return;
 
-    const targetFps = SCREEN.REFRESH_RATE * (this.fastForward ? this.speedMultiplier : this.speed);
-    const frameInterval = 1000 / targetFps;
-    const elapsed = now - this.lastFrameTime;
+    const targetSpeed = this.fastForward ? this.speedMultiplier : this.speed;
+    const dt = Math.min(now - (this.lastFrameTime || now), 100);
+    this.lastFrameTime = now;
 
-    if (elapsed >= frameInterval * 0.9 || this.fastForward) {
-      this.lastFrameTime = now;
-      this.runFrame();
-      this.framesCount++;
-
-      // Update FPS counter every second
-      if (now - this.lastFpsTime >= 1000) {
-        this.fps = Math.round((this.framesCount * 1000) / (now - this.lastFpsTime));
-        this.framesCount = 0;
-        this.lastFpsTime = now;
-        if (this.onFpsUpdate) this.onFpsUpdate(this.fps);
-
-        // Auto frame-skip: if FPS < 45, enable skip
-        if (this.frameSkipEnabled) {
-          if (this.fps < 30) {
-            this.autoFrameSkip = 2; // skip 2 of 3 frames
-          } else if (this.fps < 45) {
-            this.autoFrameSkip = 1; // skip every other
-          } else {
-            this.autoFrameSkip = 0;
-          }
-        }
+    if (targetSpeed === 1) {
+      // Smooth 60 FPS pacing on 60Hz/120Hz/144Hz displays with 1.5ms v-sync tolerance
+      this.accumulator += dt;
+      const frameInterval = 1000 / 59.7275;
+      let framesRun = 0;
+      while ((this.accumulator >= frameInterval - 1.5) && framesRun < 2) {
+        this.runFrame();
+        this.accumulator -= frameInterval;
+        this.framesCount++;
+        framesRun++;
       }
+      if (this.accumulator > frameInterval || this.accumulator < -frameInterval) {
+        this.accumulator = 0;
+      }
+    } else {
+      // Fast Forward or custom speed multiplier
+      const framesPerTick = Math.max(1, Math.min(8, Math.round(targetSpeed)));
+      for (let i = 0; i < framesPerTick; i++) {
+        this.runFrame();
+        this.framesCount++;
+      }
+    }
+
+    // Update FPS counter every second
+    if (now - this.lastFpsTime >= 1000) {
+      this.fps = Math.round((this.framesCount * 1000) / (now - this.lastFpsTime));
+      this.framesCount = 0;
+      this.lastFpsTime = now;
+      if (this.onFpsUpdate) this.onFpsUpdate(this.fps);
     }
 
     this.scheduleNextFrame();
@@ -181,63 +216,27 @@ export class GBA {
     // Apply Cheats every frame
     this.cheats.applyCheats();
 
-    // Apply freeze list every frame
+    // Apply Freeze list every frame
     this.applyFreezes();
 
-    // Determine if we should skip rendering this frame
-    let skipRender = false;
-    if (this.autoFrameSkip > 0 && this.fastForward) {
-      this.frameSkipCounter++;
-      if (this.frameSkipCounter % (this.autoFrameSkip + 1) !== 0) {
-        skipRender = true;
-      }
-    }
-
-    // Run 280,896 CPU cycles per frame
-    let cyclesRemaining = SCREEN.CYCLES_PER_FRAME;
-
-    if (skipRender) {
-      // Run CPU only, skip PPU rendering (still step for timing)
-      while (cyclesRemaining > 0) {
-        const stepCycles = this.cpu.step();
-        cyclesRemaining -= stepCycles;
-        this.ppu.step(stepCycles);
-        this.timers.step(stepCycles);
-        // Skip APU during frame-skip for speed
-      }
-    } else {
-      while (cyclesRemaining > 0) {
-        const stepCycles = this.cpu.step();
-        cyclesRemaining -= stepCycles;
-        this.ppu.step(stepCycles);
-        this.timers.step(stepCycles);
-        this.apu.step(stepCycles);
-      }
-    }
-  }
-
-  onFrameComplete(framebuffer) {
-    if (this.ctx && this.imageData32) {
-      // Direct 32-bit copy — faster than going through imageData.data
-      this.imageData32.set(framebuffer);
-      this.ctx.putImageData(this.imageData, 0, 0);
-    }
-
-    if (this.onFrameCallback) {
-      this.onFrameCallback(framebuffer);
-    }
+    // Advance 1 full frame with audio & video rendering
+    this.core.advanceFrame();
   }
 
   // Key Input management
   setKeyDown(keyBit) {
-    this.mmu.keyState &= ~(1 << keyBit);
+    if (this.core && this.core.keypad) {
+      this.core.keypad.keydown(keyBit);
+    }
   }
 
   setKeyUp(keyBit) {
-    this.mmu.keyState |= (1 << keyBit);
+    if (this.core && this.core.keypad) {
+      this.core.keypad.keyup(keyBit);
+    }
   }
 
-  // === Freeze List (Memory Scanner) ===
+  // Freeze List (Memory Scanner)
   applyFreezes() {
     const mmu = this.mmu;
     for (const f of this.freezeList) {
@@ -248,7 +247,6 @@ export class GBA {
   }
 
   addFreeze(address, value, dataType) {
-    // Remove existing freeze at same address
     this.freezeList = this.freezeList.filter(f => f.address !== address);
     this.freezeList.push({ address, value, dataType });
     this.saveFreezeList();
@@ -276,37 +274,25 @@ export class GBA {
     }
   }
 
-  // Save State
+  // Save State / Load State
   saveState(slot = 1) {
     if (!this.romLoaded) return null;
 
-    const stateObj = {
-      version: 1,
-      romTitle: this.romTitle,
-      timestamp: Date.now(),
-      cpsr: this.cpu.cpsr,
-      gpr: Array.from(this.cpu.gpr),
-      r13_bank: Array.from(this.cpu.r13_bank),
-      r14_bank: Array.from(this.cpu.r14_bank),
-      spsr_bank: Array.from(this.cpu.spsr_bank),
-      ewram: Array.from(this.mmu.ewram),
-      iwram: Array.from(this.mmu.iwram),
-      io: Array.from(this.mmu.io),
-      palette: Array.from(this.mmu.palette),
-      vram: Array.from(this.mmu.vram),
-      oam: Array.from(this.mmu.oam),
-      saveData: Array.from(this.mmu.saveData),
-      saveType: this.mmu.saveType,
-      screenshot: this.canvas ? this.canvas.toDataURL('image/jpeg', 0.8) : null
-    };
-
     try {
-      localStorage.setItem(`myboy_savestate_${this.romTitle}_slot${slot}`, JSON.stringify(stateObj));
-    } catch (e) {
-      console.warn('LocalStorage full, state only kept in memory');
-    }
+      const stateObj = {
+        version: 1,
+        romTitle: this.romTitle,
+        timestamp: Date.now(),
+        savedata: this.core.mmu.save ? Array.from(new Uint8Array(this.core.mmu.save.buffer)) : [],
+        screenshot: this.canvas ? this.canvas.toDataURL('image/jpeg', 0.8) : null
+      };
 
-    return stateObj;
+      localStorage.setItem(`myboy_savestate_${this.romTitle}_slot${slot}`, JSON.stringify(stateObj));
+      return stateObj;
+    } catch (e) {
+      console.warn('Error saving state:', e);
+      return null;
+    }
   }
 
   loadState(slot = 1) {
@@ -317,18 +303,11 @@ export class GBA {
       if (!json) return false;
 
       const stateObj = JSON.parse(json);
-      this.cpu.cpsr = stateObj.cpsr;
-      this.cpu.gpr.set(stateObj.gpr);
-      this.cpu.r13_bank.set(stateObj.r13_bank);
-      this.cpu.r14_bank.set(stateObj.r14_bank);
-      this.cpu.spsr_bank.set(stateObj.spsr_bank);
-      this.mmu.ewram.set(stateObj.ewram);
-      this.mmu.iwram.set(stateObj.iwram);
-      this.mmu.io.set(stateObj.io);
-      this.mmu.palette.set(stateObj.palette);
-      this.mmu.vram.set(stateObj.vram);
-      this.mmu.oam.set(stateObj.oam);
-      this.mmu.saveData.set(stateObj.saveData);
+      if (stateObj.savedata && this.core.mmu.save) {
+        const u8 = new Uint8Array(stateObj.savedata);
+        const target = new Uint8Array(this.core.mmu.save.buffer);
+        target.set(u8.subarray(0, target.length));
+      }
       return true;
     } catch (e) {
       console.error('Error loading state:', e);
@@ -352,8 +331,8 @@ export class GBA {
 
   // Export Battery Save (.sav)
   exportSavFile() {
-    if (!this.romLoaded) return;
-    const blob = new Blob([this.mmu.saveData], { type: 'application/octet-stream' });
+    if (!this.romLoaded || !this.core.mmu.save) return;
+    const blob = new Blob([new Uint8Array(this.core.mmu.save.buffer)], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -363,9 +342,10 @@ export class GBA {
   }
 
   importSavFile(arrayBuffer) {
+    if (!this.core.mmu.save) return;
     const data = new Uint8Array(arrayBuffer);
-    const len = Math.min(data.length, this.mmu.saveData.length);
-    this.mmu.saveData.set(data.subarray(0, len));
-    this.mmu.saveDirty = true;
+    const target = new Uint8Array(this.core.mmu.save.buffer);
+    const len = Math.min(data.length, target.length);
+    target.set(data.subarray(0, len));
   }
 }

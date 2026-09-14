@@ -5,7 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>My Boy! GBA - Trình Giả Lập Game Boy Advance</title>
   <meta name="description" content="Trình giả lập Game Boy Advance (GBA) chuẩn phong cách My Boy! hỗ trợ load ROM .gba, Save State, Fast-Forward, Cheats, Memory Scanner và Shaders." />
-  <meta name="theme-color" content="#0c0d14" />
+  <script>
+    window.global = window;
+    window.process = { env: {} };
+    window.util = {
+      inherits: function(ctor, superCtor) {
+        if (superCtor) {
+          ctor.super_ = superCtor;
+          Object.setPrototypeOf(ctor.prototype, superCtor.prototype);
+        }
+      }
+    };
+  </script>
   <link rel="stylesheet" href="/src/styles/style.css" />
 </head>
 <body>
@@ -19,6 +30,12 @@
       </div>
 
       <div class="tool-actions-wrapper">
+        <!-- Select & Start Buttons in Toolbar -->
+        <div class="header-select-start">
+          <button class="btn-pill-header" id="btn-select" aria-label="Select">SELECT</button>
+          <button class="btn-pill-header" id="btn-start" aria-label="Start">START</button>
+        </div>
+
         <!-- Hamburger Toggle Button -->
         <button class="tool-btn hamburger-btn" id="btn-hamburger" title="Mở Menu">☰</button>
 
@@ -56,7 +73,7 @@
           </div>
         </div>
 
-        <div class="canvas-wrapper filter-lcd" id="canvas-wrapper">
+        <div class="canvas-wrapper filter-pixel" id="canvas-wrapper">
           <canvas id="gba-screen" width="240" height="160"></canvas>
         </div>
 
@@ -84,17 +101,6 @@
           </div>
         </div>
 
-        <!-- Center Controls (Select / Start) -->
-        <div class="center-controls">
-          <div class="pill-button">
-            <button class="btn-pill" id="btn-select" aria-label="Select"></button>
-            <span class="pill-label">SELECT</span>
-          </div>
-          <div class="pill-button">
-            <button class="btn-pill" id="btn-start" aria-label="Start"></button>
-            <span class="pill-label">START</span>
-          </div>
-        </div>
 
         <!-- Action Buttons (A, B, Turbo) -->
         <div class="action-buttons-container">
@@ -272,10 +278,10 @@
           <div class="setting-group">
             <label>📺 Bộ lọc màn hình (Shader):</label>
             <select class="setting-select" id="setting-shader">
-              <option value="lcd" selected>Màn hình lưới LCD GBA SP</option>
-              <option value="pixel">Pixel Perfect (Gốc)</option>
+              <option value="pixel" selected>Pixel Perfect (Màu gốc chuẩn)</option>
+              <option value="vivid">Vivid Colors (Tươi sáng rực rỡ)</option>
+              <option value="lcd">Màn hình lưới LCD GBA SP</option>
               <option value="crt">CRT Scanlines (Cổ điển)</option>
-              <option value="vivid">Vivid Colors (Tươi sáng)</option>
             </select>
           </div>
 

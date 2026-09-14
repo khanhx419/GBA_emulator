@@ -403,12 +403,15 @@ window.addEventListener('DOMContentLoaded', () => {
     for (const [bitStr, name] of Object.entries(keyNames)) {
       const bit = Number(bitStr);
       const keys = controls.getKeysForButton(bit);
-      const displayKey = keys.length > 0 ? keys.map(k => k.replace('Key', '').replace('Arrow', '')).join(' / ') : 'Chưa gán';
+      const displayKey = keys.length > 0 ? keys.map(k => k.replace('Key', '').replace('Arrow', '')).join(' / ') : '<em style="color:var(--text-dim);">Chưa gán</em>';
 
       html += `
         <div class="keybind-row">
           <span class="keybind-label">${name}</span>
-          <button class="keybind-btn" data-bit="${bit}">${displayKey}</button>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button class="keybind-btn" data-bit="${bit}" title="Bấm để đổi phím (hoặc bấm Delete/Backspace để xóa)">${displayKey}</button>
+            <button class="btn-clear-key" data-bit="${bit}" style="background:rgba(255,255,255,0.06); border:1px solid var(--glass-border); color:var(--text-dim); border-radius:6px; padding:4px 8px; font-size:0.75rem; cursor:pointer;" title="Xóa phím gán">✕</button>
+          </div>
         </div>
       `;
     }
@@ -420,7 +423,11 @@ window.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       if (!activeListeningBtn) return;
       const bit = Number(activeListeningBtn.getAttribute('data-bit'));
-      controls.setKeyBinding(e.code, bit);
+      if (e.code === 'Backspace' || e.code === 'Delete' || e.code === 'Escape') {
+        controls.clearButtonBindings(bit);
+      } else {
+        controls.rebindButton(bit, e.code);
+      }
       activeListeningBtn.classList.remove('listening');
       window.removeEventListener('keydown', handleKeyRebind);
       renderKeybindGrid();
@@ -436,6 +443,14 @@ window.addEventListener('DOMContentLoaded', () => {
         btn.classList.add('listening');
         btn.textContent = 'Nhấn phím...';
         window.addEventListener('keydown', handleKeyRebind, { once: true });
+      });
+    });
+
+    grid.querySelectorAll('.btn-clear-key').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const bit = Number(btn.getAttribute('data-bit'));
+        controls.clearButtonBindings(bit);
+        renderKeybindGrid();
       });
     });
   };
@@ -463,6 +478,35 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('setting-haptic')?.addEventListener('change', (e) => {
     controls.hapticsEnabled = e.target.checked;
   });
+
+  // Audio Unlock on First Touch / Click (Web Audio mobile policy)
+  const unlockAudio = () => {
+    if (gba.core && gba.core.audio && gba.core.audio.context && gba.core.audio.context.state === 'suspended') {
+      gba.core.audio.context.resume().catch(() => {});
+    }
+    window.removeEventListener('touchstart', unlockAudio);
+    window.removeEventListener('click', unlockAudio);
+  };
+  window.addEventListener('touchstart', unlockAudio, { passive: true });
+  window.addEventListener('click', unlockAudio, { passive: true });
+
+  // Android Capacitor Hardware Back Button
+  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+    window.Capacitor.Plugins.App.addListener('backButton', () => {
+      const openModalEl = document.querySelector('.modal-backdrop.open');
+      if (openModalEl) {
+        closeAllModals();
+      } else if (hamburgerDropdown && hamburgerDropdown.classList.contains('open')) {
+        hamburgerDropdown.classList.remove('open');
+      } else {
+        if (gba.running && !gba.paused) {
+          gba.pause();
+          powerLed.classList.add('paused');
+          openModal('modal-settings');
+        }
+      }
+    });
+  }
 
   // Auto load demo on first start if no ROM loaded
   setTimeout(async () => {

@@ -56,7 +56,31 @@ export class GBAControls {
     this.saveKeyMap();
   }
 
-  // Set key code for a specific GBA button bit
+  // Clear all key codes mapped to a specific button
+  clearButtonBindings(gbaKeyBit) {
+    for (const [code, bit] of Object.entries(this.keyMap)) {
+      if (bit === gbaKeyBit) {
+        delete this.keyMap[code];
+      }
+    }
+    this.saveKeyMap();
+  }
+
+  // Replace all bindings for a button with a new key code
+  rebindButton(gbaKeyBit, keyCode) {
+    // Delete any other button using this keyCode
+    delete this.keyMap[keyCode];
+    // Clear old keys for this specific button
+    for (const [code, bit] of Object.entries(this.keyMap)) {
+      if (bit === gbaKeyBit) {
+        delete this.keyMap[code];
+      }
+    }
+    this.keyMap[keyCode] = gbaKeyBit;
+    this.saveKeyMap();
+  }
+
+  // Set key code for a specific GBA button bit (additional binding)
   setKeyBinding(keyCode, gbaKeyBit) {
     // Remove existing binding for this code
     delete this.keyMap[keyCode];

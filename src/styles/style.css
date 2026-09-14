@@ -175,6 +175,42 @@ html, body {
   font-weight: bold;
 }
 
+/* Header Toolbar Select & Start Buttons */
+.header-select-start {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-pill-header {
+  background: linear-gradient(180deg, #2c3248 0%, #1c1f30 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--text-dim);
+  font-family: var(--font-family);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  padding: 0 10px;
+  height: 30px;
+  border-radius: 15px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  touch-action: manipulation;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.btn-pill-header.pressed, .btn-pill-header:active {
+  background: var(--accent-cyan);
+  color: #000;
+  box-shadow: 0 0 12px var(--accent-cyan);
+  transform: scale(0.94);
+}
+
 /* Hamburger Dropdown Menu */
 .dropdown-menu {
   position: absolute;
@@ -262,8 +298,8 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 10px calc(max(env(safe-area-inset-bottom), 6px));
-  max-width: 480px;
+  padding: 6px 12px calc(max(env(safe-area-inset-bottom), 24px) + 12px);
+  max-width: 520px;
   margin: 0 auto;
   width: 100%;
   position: relative;
@@ -363,29 +399,35 @@ html, body {
 }
 
 /* Shoulder Buttons (L / R) */
+.virtual-gamepad,
+.virtual-gamepad * {
+  touch-action: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .shoulder-container {
   width: 100%;
   display: flex;
   justify-content: space-between;
-  margin-top: 6px;
-  padding: 0 4px;
+  margin-top: 8px;
+  padding: 0 6px;
 }
 
 .btn-shoulder {
-  width: 72px;
-  height: 30px;
+  width: 88px;
+  height: 38px;
   background: linear-gradient(180deg, #333852 0%, #1e2235 100%);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--text-dim);
   font-weight: 800;
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
   cursor: pointer;
-  touch-action: manipulation;
+  touch-action: none;
 }
 
 .btn-shoulder.pressed, .btn-shoulder:active {
@@ -402,16 +444,18 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 6px;
-  min-height: 130px;
-  max-height: 220px;
+  padding: 0 8px;
+  min-height: 160px;
+  max-height: 280px;
+  margin-top: auto;
+  margin-bottom: 6px;
 }
 
 /* D-Pad */
 .dpad-container {
   position: relative;
-  width: 136px;
-  height: 136px;
+  width: 160px;
+  height: 160px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -419,8 +463,8 @@ html, body {
 }
 
 .dpad {
-  width: 126px;
-  height: 126px;
+  width: 152px;
+  height: 152px;
   position: relative;
 }
 
@@ -434,28 +478,28 @@ html, body {
 
 .dpad-h {
   position: absolute;
-  width: 120px;
-  height: 40px;
+  width: 148px;
+  height: 50px;
   background: linear-gradient(180deg, #2b3046 0%, #1b1e2e 100%);
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .dpad-v {
   position: absolute;
-  width: 40px;
-  height: 120px;
+  width: 50px;
+  height: 148px;
   background: linear-gradient(90deg, #2b3046 0%, #1b1e2e 100%);
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .dpad-center-cap {
   position: absolute;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   background: radial-gradient(circle, #252a3d 0%, #151824 100%);
   border-radius: 50%;
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.8);
@@ -464,35 +508,36 @@ html, body {
 .dpad-arrow {
   position: absolute;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 15px;
   pointer-events: none;
 }
-.dpad-up { top: 5px; left: 50%; transform: translateX(-50%); }
-.dpad-down { bottom: 5px; left: 50%; transform: translateX(-50%); }
-.dpad-left { left: 6px; top: 50%; transform: translateY(-50%); }
-.dpad-right { right: 6px; top: 50%; transform: translateY(-50%); }
+.dpad-up { top: 6px; left: 50%; transform: translateX(-50%); }
+.dpad-down { bottom: 6px; left: 50%; transform: translateX(-50%); }
+.dpad-left { left: 8px; top: 50%; transform: translateY(-50%); }
+.dpad-right { right: 8px; top: 50%; transform: translateY(-50%); }
 
 /* Action Buttons (A, B, Turbo) */
 .action-buttons-container {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   align-items: flex-end;
 }
 
 .turbo-row {
   display: flex;
-  gap: 8px;
+  gap: 10px;
+  margin-right: 10px;
 }
 
 .btn-turbo {
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   background: #2a2e45;
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: var(--accent-amber);
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   font-weight: 800;
   display: flex;
   align-items: center;
@@ -510,20 +555,20 @@ html, body {
 
 .primary-action-row {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   transform: rotate(-25deg);
-  margin-right: 4px;
-  margin-top: 4px;
+  margin-right: 8px;
+  margin-top: 6px;
 }
 
 .btn-action {
-  width: 54px;
-  height: 54px;
+  width: 66px;
+  height: 66px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.2rem;
+  font-size: 1.45rem;
   font-weight: 900;
   color: #fff;
   cursor: pointer;
@@ -551,7 +596,7 @@ html, body {
 /* Center Bottom: Start & Select */
 .center-controls {
   display: flex;
-  gap: 18px;
+  gap: 22px;
   margin-top: 2px;
   flex-shrink: 0;
   align-self: center;
@@ -561,12 +606,12 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 
 .btn-pill {
-  width: 46px;
-  height: 15px;
+  width: 52px;
+  height: 18px;
   background: #25293d;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -582,7 +627,7 @@ html, body {
 }
 
 .pill-label {
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 1px;
   color: var(--text-dim);
@@ -955,8 +1000,8 @@ html, body {
   100% { transform: scale(1); }
 }
 
-/* Landscape Mode (Preserved & Enhanced) */
-@media (orientation: landscape) and (max-height: 560px) {
+/* Landscape Mode (Optimized: Elevated controls, zero screen overlap) */
+@media (orientation: landscape) {
   .top-toolbar {
     min-height: 38px;
     height: 38px;
@@ -968,36 +1013,73 @@ html, body {
     max-width: 100%;
     padding: 0;
     justify-content: center;
+    align-items: center;
     position: relative;
     height: calc(100vh - 38px);
+    height: calc(100dvh - 38px);
     max-height: calc(100vh - 38px);
+    max-height: calc(100dvh - 38px);
+    overflow: hidden;
   }
 
+  /* Game screen constrained so left & right sidebars have ample room for controls */
   .screen-housing {
-    height: calc(100vh - 40px);
+    height: 100%;
+    max-height: min(calc(100vh - 42px), calc(100dvh - 42px), calc((100vw - 380px) * 2 / 3));
     width: auto;
     aspect-ratio: 3 / 2;
-    padding: 2px;
+    padding: 0;
+    margin: auto;
     border-radius: 8px;
     z-index: 1;
     background: transparent;
     border: none;
     box-shadow: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .screen-header {
     display: none;
   }
 
+  /* L & R Shoulder Buttons in Landscape (Top-Left & Top-Right) */
   .shoulder-container {
-    display: none;
+    display: flex;
+    position: fixed;
+    top: 42px;
+    left: 0;
+    right: 0;
+    padding: 0 max(env(safe-area-inset-right), 18px) 0 max(env(safe-area-inset-left), 18px);
+    justify-content: space-between;
+    pointer-events: none;
+    z-index: 15;
+    margin: 0;
+  }
+
+  .shoulder-container .btn-shoulder {
+    pointer-events: auto;
+    width: 76px;
+    height: 32px;
+    font-size: 0.85rem;
+    opacity: 0.85;
+    border-radius: 8px;
   }
 
   .canvas-wrapper {
     height: 100%;
     max-height: 100%;
-    width: auto;
+    width: 100%;
+    aspect-ratio: 3 / 2;
     border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.85);
+  }
+
+  #gba-screen {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
   }
 
   .controls-area {
@@ -1005,34 +1087,67 @@ html, body {
     top: 0; left: 0; right: 0; bottom: 0;
     pointer-events: none;
     margin: 0;
-    padding: 10px max(env(safe-area-inset-right), 16px) 10px max(env(safe-area-inset-left), 16px);
+    padding: 0;
     z-index: 10;
     max-height: 100%;
+    height: 100%;
+    width: 100%;
   }
 
-  .dpad-container, .action-buttons-container, .center-controls {
+  .dpad-container, .action-buttons-container {
     pointer-events: auto;
-    opacity: 0.85;
+    opacity: 0.92;
   }
 
-  .center-controls {
-    position: absolute;
-    bottom: 8px;
-    left: 50%;
-    transform: translateX(-50%);
-  }
-
+  /* D-Pad elevated halfway up from bottom for comfortable thumb reach */
   .dpad-container {
     position: absolute;
-    left: 16px;
-    bottom: 12px;
-    transform: scale(0.9);
+    left: max(env(safe-area-inset-left), 18px);
+    bottom: max(env(safe-area-inset-bottom), 65px);
+    top: auto;
+    transform: none;
+    transform-origin: center left;
   }
 
+  /* Action buttons raised high up for natural right-thumb reach */
   .action-buttons-container {
     position: absolute;
-    right: 16px;
-    bottom: 12px;
-    transform: scale(0.9);
+    right: max(env(safe-area-inset-right), 18px);
+    top: 48%;
+    bottom: auto;
+    transform: translateY(-50%);
+    transform-origin: center right;
+  }
+}
+
+/* Compact Portrait Screen Responsiveness (e.g. older/smaller phones) */
+@media (orientation: portrait) and (max-height: 680px) {
+  .console-body {
+    padding-bottom: calc(max(env(safe-area-inset-bottom), 16px) + 6px);
+  }
+  .controls-area {
+    min-height: 140px;
+    max-height: 240px;
+  }
+  .dpad-container {
+    width: 144px;
+    height: 144px;
+  }
+  .dpad {
+    width: 136px;
+    height: 136px;
+  }
+  .dpad-h {
+    width: 132px;
+    height: 44px;
+  }
+  .dpad-v {
+    width: 44px;
+    height: 132px;
+  }
+  .btn-action {
+    width: 58px;
+    height: 58px;
+    font-size: 1.3rem;
   }
 }

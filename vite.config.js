@@ -9,6 +9,9 @@ export default defineConfig({
       'Cross-Origin-Embedder-Policy': 'require-corp'
     }
   },
+  define: {
+    'global': 'window'
+  },
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
