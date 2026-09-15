@@ -289,6 +289,108 @@ html, body {
   border-radius: 6px;
 }
 
+/* Dropdown Menu Enhanced Controls */
+.menu-speed-block {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.speed-btn-group {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.btn-speed-preset {
+  flex: 1;
+  background: #1e2235;
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  padding: 4px 0;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.12s;
+}
+
+.btn-speed-preset:hover {
+  border-color: var(--accent-cyan);
+}
+
+.btn-speed-preset.active {
+  background: var(--accent-cyan);
+  color: #000;
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 8px rgba(0, 242, 254, 0.4);
+}
+
+.menu-speed-slider {
+  width: 100%;
+  accent-color: var(--accent-cyan);
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.menu-control-type-block {
+  padding: 6px 10px;
+}
+
+.ctrl-mode-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-ctrl-mode {
+  flex: 1;
+  background: #1e2235;
+  border: 1px solid var(--glass-border);
+  color: var(--text-dim);
+  padding: 6px 4px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.12s;
+}
+
+.btn-ctrl-mode:hover {
+  border-color: var(--accent-cyan);
+}
+
+.btn-ctrl-mode.active {
+  background: linear-gradient(135deg, var(--accent-cyan), #0077b6);
+  color: #000;
+  font-weight: 800;
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(0, 242, 254, 0.4);
+}
+
+.menu-item-highlight {
+  background: linear-gradient(135deg, rgba(121, 40, 202, 0.35), rgba(255, 0, 127, 0.25));
+  border: 1px solid rgba(255, 0, 127, 0.4);
+}
+
+.menu-item-highlight:hover, .menu-item-highlight:active {
+  background: linear-gradient(135deg, var(--accent-purple), var(--accent-magenta));
+  color: #fff;
+  box-shadow: 0 0 12px rgba(255, 0, 127, 0.5);
+}
+
+.layout-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  background: rgba(0, 242, 254, 0.15);
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 242, 254, 0.3);
+}
+
 /* Console Handheld Layout (Portrait Optimized) */
 .console-body {
   flex: 1;
@@ -1094,13 +1196,13 @@ html, body {
     width: 100%;
   }
 
-  .dpad-container, .action-buttons-container {
+  .dpad-container, .joystick-zone, .action-buttons-container {
     pointer-events: auto;
     opacity: 0.92;
   }
 
-  /* D-Pad elevated halfway up from bottom for comfortable thumb reach */
-  .dpad-container {
+  /* D-Pad & Joystick elevated halfway up from bottom for comfortable thumb reach */
+  .dpad-container, .joystick-zone {
     position: absolute;
     left: max(env(safe-area-inset-left), 18px);
     bottom: max(env(safe-area-inset-bottom), 65px);

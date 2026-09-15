@@ -460,56 +460,91 @@ window.addEventListener('DOMContentLoaded', () => {
     renderKeybindGrid();
   });
 
-  // --- Settings ---
-  const speedSlider = document.getElementById('setting-speed');
+  // --- Settings & Menu Fast-Forward Controls ---
+  const speedSliderModal = document.getElementById('setting-speed');
+  const speedSliderMenu = document.getElementById('menu-speed-slider');
   const speedDisplay = document.getElementById('speed-val-display');
   const ffLabel = document.getElementById('ff-label');
+  const speedPresets = document.querySelectorAll('.btn-speed-preset');
 
-  // Load saved speed or default 2.0
-  const savedSpeed = localStorage.getItem('myboy_ff_speed');
-  if (savedSpeed) {
-    const spd = parseFloat(savedSpeed);
-    if (!isNaN(spd)) {
-      if (speedSlider) speedSlider.value = spd;
-      gba.speedMultiplier = spd;
-      const formatted = `${spd.toFixed(spd % 1 === 0 ? 1 : 2)}x`;
-      if (speedDisplay) speedDisplay.textContent = formatted;
-      if (ffLabel) ffLabel.textContent = formatted;
-    }
-  }
+  const updateSpeed = (val) => {
+    const num = Math.max(1.0, Math.min(5.0, parseFloat(val)));
+    gba.speedMultiplier = num;
+    const formatted = `${num.toFixed(num % 1 === 0 ? 1 : 2)}x`;
 
-  speedSlider?.addEventListener('input', (e) => {
-    const val = parseFloat(e.target.value);
-    gba.speedMultiplier = val;
-    const formatted = `${val.toFixed(val % 1 === 0 ? 1 : 2)}x`;
+    if (speedSliderModal) speedSliderModal.value = num;
+    if (speedSliderMenu) speedSliderMenu.value = num;
     if (speedDisplay) speedDisplay.textContent = formatted;
     if (ffLabel) ffLabel.textContent = formatted;
-    localStorage.setItem('myboy_ff_speed', val.toString());
+
+    speedPresets.forEach(btn => {
+      const pSpd = parseFloat(btn.getAttribute('data-speed'));
+      btn.classList.toggle('active', Math.abs(pSpd - num) < 0.05);
+    });
+
+    try {
+      localStorage.setItem('myboy_ff_speed', num.toString());
+    } catch (e) {}
+  };
+
+  // Load saved speed or default 2.0
+  const savedSpeed = localStorage.getItem('myboy_ff_speed') || '2.0';
+  updateSpeed(savedSpeed);
+
+  speedSliderModal?.addEventListener('input', (e) => updateSpeed(e.target.value));
+  speedSliderMenu?.addEventListener('input', (e) => updateSpeed(e.target.value));
+
+  speedPresets.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const spd = parseFloat(btn.getAttribute('data-speed'));
+      updateSpeed(spd);
+    });
   });
 
-  // Joystick mode selector
+  // --- Movement Mode (D-Pad / Fixed Joystick / Floating Joystick) ---
   const controlTypeSelect = document.getElementById('setting-control-type');
-  if (controlTypeSelect) {
-    const savedType = localStorage.getItem('myboy_control_type') || 'dpad';
-    controlTypeSelect.value = savedType;
-    controls.setMovementMode(savedType);
+  const ctrlModeButtons = document.querySelectorAll('.btn-ctrl-mode');
 
-    controlTypeSelect.addEventListener('change', (e) => {
-      const mode = e.target.value;
-      controls.setMovementMode(mode);
-      localStorage.setItem('myboy_control_type', mode);
+  const updateMovementMode = (mode) => {
+    controls.setMovementMode(mode);
+    if (controlTypeSelect) controlTypeSelect.value = mode;
+
+    ctrlModeButtons.forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
     });
-  }
 
-  // Layout Editor Trigger
-  document.getElementById('btn-open-layout-editor')?.addEventListener('click', () => {
+    try {
+      localStorage.setItem('myboy_control_type', mode);
+    } catch (e) {}
+  };
+
+  const savedMode = localStorage.getItem('myboy_control_type') || 'dpad';
+  updateMovementMode(savedMode);
+
+  controlTypeSelect?.addEventListener('change', (e) => updateMovementMode(e.target.value));
+
+  ctrlModeButtons.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const mode = btn.getAttribute('data-mode');
+      updateMovementMode(mode);
+    });
+  });
+
+  // --- Layout Editor Triggers ---
+  const triggerLayoutEditor = () => {
     closeAllModals();
+    if (hamburgerDropdown) hamburgerDropdown.classList.remove('open');
     if (gba.running && !gba.paused) {
       gba.pause();
       powerLed.classList.add('paused');
     }
     controls.openLayoutEditor();
-  });
+  };
+
+  document.getElementById('btn-open-layout-editor')?.addEventListener('click', triggerLayoutEditor);
+  document.getElementById('btn-menu-layout-editor')?.addEventListener('click', triggerLayoutEditor);
 
   document.getElementById('setting-shader')?.addEventListener('change', (e) => {
     shaders.setFilter(e.target.value);
