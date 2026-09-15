@@ -6,12 +6,6 @@ export const PRELOADED_GAMES = [
     fileName: 'Radical Red (v4.0).gba',
     url: '/game/Radical%20Red%20(v4.0).gba',
     size: '32.0 MB'
-  },
-  {
-    title: 'Ultimate Spider-Man (USA)',
-    fileName: 'Ultimate Spider-Man (USA).gba',
-    url: '/game/Ultimate%20Spider-Man%20(USA).gba',
-    size: '16.0 MB'
   }
 ];
 
