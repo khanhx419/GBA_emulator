@@ -171,9 +171,11 @@ GameBoyAdvance.prototype.reset = function() {
 };
 
 GameBoyAdvance.prototype.step = function() {
-	while (this.doStep()) {
-		this.cpu.step();
+	var cpu = this.cpu;
+	while (!this.seenFrame) {
+		cpu.step();
 	}
+	this.seenFrame = false;
 };
 
 GameBoyAdvance.prototype.waitFrame = function() {

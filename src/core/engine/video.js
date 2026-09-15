@@ -44,6 +44,7 @@ GameBoyAdvanceVideo.prototype.clear = function() {
 	this.nextHblankIRQ = 0;
 	this.nextVblankIRQ = 0;
 	this.nextVcounterIRQ = 0;
+	this.skipDraw = false;
 };
 
 GameBoyAdvanceVideo.prototype.freeze = function() {
@@ -177,7 +178,7 @@ GameBoyAdvanceVideo.prototype.readDisplayStat = function() {
 };
 
 GameBoyAdvanceVideo.prototype.finishDraw = function(pixelData) {
-	if (this.context && typeof this.context.putImageData === 'function' && pixelData) {
+	if (!this.skipDraw && this.context && typeof this.context.putImageData === 'function' && pixelData) {
 		this.context.putImageData(pixelData, 0, 0);
 	}
 	this.drawCallback();

@@ -192,15 +192,25 @@ export class GBA {
     const maxFramesPerTick = Math.max(2, Math.ceil(targetSpeed) + 1);
 
     while (this.accumulator >= frameInterval - 1.5 && framesRun < maxFramesPerTick) {
-      // Frame-skip: at high speeds (>=2x), only render the last frame
-      if (targetSpeed >= 2 && this.accumulator >= frameInterval * 2) {
-        this.core.advanceFrame();
-      } else {
-        this.runFrame();
+      // Intelligent Adaptive Frame-skip:
+      // When lagging behind (accumulator >= frameInterval * 2) or running at high speed (>= 2x),
+      // skip expensive Canvas putImageData and software scanline compositing on intermediate catch-up frames.
+      // This prevents the "spiral of death" and maintains smooth 60 FPS pacing even on low-spec phones!
+      const isCatchingUp = (this.accumulator >= frameInterval * 2) && (framesRun < maxFramesPerTick - 1);
+      const shouldSkipDraw = (targetSpeed >= 2 && this.accumulator >= frameInterval * 2) || isCatchingUp;
+
+      if (this.core && this.core.video) {
+        this.core.video.skipDraw = shouldSkipDraw;
       }
+
+      this.runFrame();
       this.accumulator -= frameInterval;
       this.framesCount++;
       framesRun++;
+    }
+
+    if (this.core && this.core.video) {
+      this.core.video.skipDraw = false;
     }
 
     // Prevent negative drift
@@ -245,7 +255,9 @@ export class GBA {
 
   // Freeze List (Memory Scanner)
   applyFreezes() {
+    if (!this.freezeList || this.freezeList.length === 0) return;
     const mmu = this.mmu;
+    if (!mmu) return;
     for (const f of this.freezeList) {
       if (f.dataType === 'u8') mmu.write8(f.address, f.value & 0xFF);
       else if (f.dataType === 'u16') mmu.write16(f.address, f.value & 0xFFFF);

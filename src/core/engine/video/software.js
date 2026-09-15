@@ -1614,6 +1614,7 @@ GameBoyAdvanceSoftwareRenderer.prototype.drawScanline = function(y) {
 };
 
 GameBoyAdvanceSoftwareRenderer.prototype.finishScanline = function(backing) {
+	if (this.video && this.video.skipDraw) return;
 	var color;
 	var bd = this.palette.accessColor(this.LAYER_BACKDROP, 0);
 	var offset = this.vcount * this.HORIZONTAL_PIXELS;

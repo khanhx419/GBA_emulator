@@ -34,6 +34,7 @@ export class GBACheats {
   }
 
   applyCheats() {
+    if (!this.cheats || this.cheats.length === 0) return;
     const mmu = this.gba.mmu;
     if (!mmu || !mmu.romSize) return;
 
