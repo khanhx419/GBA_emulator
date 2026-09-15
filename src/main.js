@@ -1,4 +1,5 @@
 import { GBA } from './core/gba.js';
+import { EmulatorAdapter } from './core/emulator-adapter.js';
 import { GBAControls } from './ui/controls.js';
 import { GBALibrary } from './ui/library.js';
 import { GBAShaders } from './ui/shaders.js';
@@ -15,7 +16,10 @@ window.addEventListener('DOMContentLoaded', () => {
   const hamburgerDropdown = document.getElementById('hamburger-dropdown');
 
   // Initialize GBA Subsystems
-  const gba = new GBA(canvas);
+  // Use EmulatorJS WASM core (5-10x faster) by default
+  // Falls back to JS engine if WASM fails to load
+  const useWasm = (localStorage.getItem('gba_k_engine') || 'wasm') === 'wasm';
+  const gba = useWasm ? new EmulatorAdapter(canvas) : new GBA(canvas);
   const controls = new GBAControls(gba);
   const shaders = new GBAShaders(canvasWrapper);
   const scanner = new GBAMemoryScanner(gba);
@@ -557,6 +561,18 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('setting-haptic')?.addEventListener('change', (e) => {
     controls.hapticsEnabled = e.target.checked;
   });
+
+  const engineSelect = document.getElementById('setting-engine');
+  if (engineSelect) {
+    engineSelect.value = localStorage.getItem('gba_k_engine') || 'wasm';
+    engineSelect.addEventListener('change', (e) => {
+      const chosen = e.target.value;
+      localStorage.setItem('gba_k_engine', chosen);
+      if (confirm(`Đã đổi động cơ sang ${chosen === 'wasm' ? 'mGBA WebAssembly (Cực nhanh)' : 'JavaScript (Cổ điển)'}. Tải lại ứng dụng ngay để áp dụng?`)) {
+        window.location.reload();
+      }
+    });
+  }
 
   // Audio Unlock on First Touch / Click (Web Audio mobile policy)
   const unlockAudio = () => {
