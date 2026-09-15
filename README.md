@@ -1,18 +1,20 @@
 # GBA_emulator
 
-🎮 **My Boy! GBA Emulator** - Trình giả lập Game Boy Advance hiện đại chạy trên Web và Android (APK).
+🎮 **GBA_K Emulator** - Trình giả lập Game Boy Advance hiện đại chạy trên Web và Android (APK).
 
 ---
 
 ## ✨ Tính Năng Nổi Bật
 
 - 🕹️ **Chạy mượt mà mọi file ROM `.gba`**: Tự động nhận diện SRAM, Flash 64K/128K, EEPROM.
-- ⚡ **Tua nhanh (Fast-Forward)**: 1.5x, 2x, 4x, 8x tăng tốc cày cấp game.
+- ⚡ **Tua nhanh (Fast-Forward)**: 1.0x - 5.0x mượt mà với thanh trượt và nút chọn nhanh.
+- 🕹️ **Kiểu điều khiển đa dạng**: D-Pad cổ điển, Joystick Cố định và Joystick Tự do (Floating).
+- 📐 **Tùy chỉnh bố cục phím**: Tự do kéo thả vị trí, phóng to thu nhỏ nút bấm (60% - 160%).
 - 💾 **Save / Load States**: 6 slot lưu trạng thái có hình chụp màn hình preview và hỗ trợ xuất/nhập file `.sav`.
-- 📱 **Giao diện My Boy! Translucent**: Bộ phím cảm ứng đa điểm D-pad 8 hướng, Turbo A/B, L/R bumpers, rung phản hồi Haptic.
+- 📱 **Giao diện GBA_K Translucent**: Bộ phím cảm ứng đa điểm, Turbo A/B, L/R bumpers, rung phản hồi Haptic.
 - 📺 **Bộ lọc màn hình (Shaders)**: Màn hình lưới LCD GBA SP, CRT Scanlines, Pixel-Perfect.
 - 👾 **Trình quản lý Cheat Code**: Hỗ trợ GameShark, CodeBreaker, Raw RAM codes.
-- 📦 **Đóng gói Android APK**: Tích hợp sẵn bản build Android standalone APK.
+- 📦 **Đóng gói Android APK**: Tích hợp sẵn bản build Android standalone APK (`GBA_K.apk`).
 
 ---
 

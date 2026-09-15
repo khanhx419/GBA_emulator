@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">My Boy! GBA</string>
-    <string name="title_activity_main">My Boy! GBA</string>
+    <string name="app_name">GBA_K</string>
+    <string name="title_activity_main">GBA_K</string>
     <string name="package_name">com.antigravity.myboygba</string>
     <string name="custom_url_scheme">com.antigravity.myboygba</string>
 </resources>

@@ -1,6 +1,6 @@
 @echo off
 echo ========================================================
-echo   My Boy! GBA - Dong goi ung dung Android APK
+echo   GBA_K - Dong goi ung dung Android APK
 echo ========================================================
 echo.
 
@@ -46,7 +46,7 @@ echo   android\app\build\outputs\apk\debug\app-debug.apk
 echo ========================================================
 echo.
 
-copy /Y android\app\build\outputs\apk\debug\app-debug.apk .\MyBoy-GBA-Emulator.apk
-echo Da sao chep file APK ra thu muc goc: MyBoy-GBA-Emulator.apk
+copy /Y android\app\build\outputs\apk\debug\app-debug.apk .\GBA_K.apk
+echo Da sao chep file APK ra thu muc goc: GBA_K.apk
 echo.
 pause

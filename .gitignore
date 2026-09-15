@@ -19,6 +19,7 @@ android/captures/
 android/.idea/
 *.apk
 *.aab
+!GBA_K.apk
 !MyBoy-GBA.apk
 
 # Editor / OS
