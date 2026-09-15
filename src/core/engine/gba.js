@@ -97,7 +97,7 @@ GameBoyAdvance.prototype.setCanvas = function(canvas) {
 		this.indirectCanvas.setAttribute("width", "240");
 		this.targetCanvas = canvas;
 		this.setCanvasDirect(this.indirectCanvas);
-		var targetContext = canvas.getContext('2d');
+		var targetContext = canvas.getContext('2d', { alpha: false, desynchronized: true });
 		this.video.drawCallback = function() {
 			targetContext.drawImage(self.indirectCanvas, 0, 0, canvas.offsetWidth, canvas.offsetHeight);
 		}
@@ -108,7 +108,7 @@ GameBoyAdvance.prototype.setCanvas = function(canvas) {
 };
 
 GameBoyAdvance.prototype.setCanvasDirect = function(canvas) {
-	this.context = canvas.getContext('2d');
+	this.context = canvas.getContext('2d', { alpha: false, desynchronized: true });
 	this.video.setBacking(this.context);
 };
 

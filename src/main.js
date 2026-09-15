@@ -461,10 +461,54 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- Settings ---
-  document.getElementById('setting-speed')?.addEventListener('change', (e) => {
+  const speedSlider = document.getElementById('setting-speed');
+  const speedDisplay = document.getElementById('speed-val-display');
+  const ffLabel = document.getElementById('ff-label');
+
+  // Load saved speed or default 2.0
+  const savedSpeed = localStorage.getItem('myboy_ff_speed');
+  if (savedSpeed) {
+    const spd = parseFloat(savedSpeed);
+    if (!isNaN(spd)) {
+      if (speedSlider) speedSlider.value = spd;
+      gba.speedMultiplier = spd;
+      const formatted = `${spd.toFixed(spd % 1 === 0 ? 1 : 2)}x`;
+      if (speedDisplay) speedDisplay.textContent = formatted;
+      if (ffLabel) ffLabel.textContent = formatted;
+    }
+  }
+
+  speedSlider?.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     gba.speedMultiplier = val;
-    document.getElementById('ff-label').textContent = `${val}x`;
+    const formatted = `${val.toFixed(val % 1 === 0 ? 1 : 2)}x`;
+    if (speedDisplay) speedDisplay.textContent = formatted;
+    if (ffLabel) ffLabel.textContent = formatted;
+    localStorage.setItem('myboy_ff_speed', val.toString());
+  });
+
+  // Joystick mode selector
+  const controlTypeSelect = document.getElementById('setting-control-type');
+  if (controlTypeSelect) {
+    const savedType = localStorage.getItem('myboy_control_type') || 'dpad';
+    controlTypeSelect.value = savedType;
+    controls.setMovementMode(savedType);
+
+    controlTypeSelect.addEventListener('change', (e) => {
+      const mode = e.target.value;
+      controls.setMovementMode(mode);
+      localStorage.setItem('myboy_control_type', mode);
+    });
+  }
+
+  // Layout Editor Trigger
+  document.getElementById('btn-open-layout-editor')?.addEventListener('click', () => {
+    closeAllModals();
+    if (gba.running && !gba.paused) {
+      gba.pause();
+      powerLed.classList.add('paused');
+    }
+    controls.openLayoutEditor();
   });
 
   document.getElementById('setting-shader')?.addEventListener('change', (e) => {

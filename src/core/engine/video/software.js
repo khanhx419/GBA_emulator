@@ -872,6 +872,18 @@ GameBoyAdvanceSoftwareRenderer.prototype.clear = function(mmu) {
 		stencil: new Uint8Array(this.HORIZONTAL_PIXELS)
 	};
 	this.sharedColor = [ 0, 0, 0 ];
+
+	// Pre-computed color LUT: GBA 15-bit color → RGBA 32-bit (little-endian: ABGR)
+	this.colorLUT = new Uint32Array(32768);
+	for (var i = 0; i < 32768; ++i) {
+		var r = i & 0x001F;
+		var g = (i & 0x03E0) >> 5;
+		var b = (i & 0x7C00) >> 10;
+		r = (r << 3) | (r >> 2);
+		g = (g << 3) | (g >> 2);
+		b = (b << 3) | (b >> 2);
+		this.colorLUT[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
+	}
 	this.sharedMap = {
 		tile: 0,
 		hflip: false,
@@ -903,14 +915,10 @@ GameBoyAdvanceSoftwareRenderer.prototype.defrost = function(frost) {
 
 GameBoyAdvanceSoftwareRenderer.prototype.setBacking = function(backing) {
 	this.pixelData = backing;
+	this.pixelData32 = new Uint32Array(this.pixelData.data.buffer);
 
-	// Clear backing first
-	for (var offset = 0; offset < this.HORIZONTAL_PIXELS * this.VERTICAL_PIXELS * 4;) {
-		this.pixelData.data[offset++] = 0xFF;
-		this.pixelData.data[offset++] = 0xFF;
-		this.pixelData.data[offset++] = 0xFF;
-		this.pixelData.data[offset++] = 0xFF;
-	}
+	// Clear backing first (white, opaque)
+	this.pixelData32.fill(0xFFFFFFFF);
 };
 
 GameBoyAdvanceSoftwareRenderer.prototype.writeDisplayControl = function(value) {
@@ -1608,22 +1616,20 @@ GameBoyAdvanceSoftwareRenderer.prototype.drawScanline = function(y) {
 GameBoyAdvanceSoftwareRenderer.prototype.finishScanline = function(backing) {
 	var color;
 	var bd = this.palette.accessColor(this.LAYER_BACKDROP, 0);
-	var xx = this.vcount * this.HORIZONTAL_PIXELS * 4;
+	var offset = this.vcount * this.HORIZONTAL_PIXELS;
 	var isTarget2 = this.target2[this.LAYER_BACKDROP];
+	var lut = this.colorLUT;
+	var pixels32 = this.pixelData32;
 	for (var x = 0; x < this.HORIZONTAL_PIXELS; ++x) {
 		if (backing.stencil[x] & this.WRITTEN_MASK) {
 			color = backing.color[x];
 			if (isTarget2 && backing.stencil[x] & this.TARGET1_MASK) {
 				color = this.palette.mix(this.blendA, color, this.blendB, bd);
 			}
-			this.palette.convert16To32(color, this.sharedColor);
 		} else {
-			this.palette.convert16To32(bd, this.sharedColor);
+			color = bd;
 		}
-		this.pixelData.data[xx++] = this.sharedColor[0];
-		this.pixelData.data[xx++] = this.sharedColor[1];
-		this.pixelData.data[xx++] = this.sharedColor[2];
-		xx++;
+		pixels32[offset + x] = lut[color & 0x7FFF];
 	}
 };
 

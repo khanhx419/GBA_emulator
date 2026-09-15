@@ -78,7 +78,7 @@
         </div>
 
         <!-- L & R Shoulder Buttons (Portrait) -->
-        <div class="shoulder-container">
+        <div class="shoulder-container" id="shoulder-container">
           <button class="btn-shoulder" id="btn-l" aria-label="Button L">L</button>
           <button class="btn-shoulder" id="btn-r" aria-label="Button R">R</button>
         </div>
@@ -87,7 +87,7 @@
       <!-- Lower Controls Area -->
       <section class="controls-area">
         <!-- Virtual D-Pad -->
-        <div class="dpad-container">
+        <div class="dpad-container" id="dpad-container">
           <div class="dpad" id="dpad">
             <div class="dpad-cross">
               <div class="dpad-h"></div>
@@ -101,15 +101,21 @@
           </div>
         </div>
 
+        <!-- Virtual Joystick (Fixed / Floating) -->
+        <div class="joystick-zone" id="joystick-zone" style="display: none;">
+          <div class="joystick-base" id="joystick-base">
+            <div class="joystick-knob" id="joystick-knob"></div>
+          </div>
+        </div>
 
         <!-- Action Buttons (A, B, Turbo) -->
-        <div class="action-buttons-container">
-          <div class="turbo-row">
+        <div class="action-buttons-container" id="action-buttons-container">
+          <div class="turbo-row" id="turbo-row">
             <button class="btn-turbo" id="btn-turbo-b" aria-label="Turbo B">TB</button>
             <button class="btn-turbo" id="btn-turbo-a" aria-label="Turbo A">TA</button>
           </div>
 
-          <div class="primary-action-row">
+          <div class="primary-action-row" id="primary-action-row">
             <button class="btn-action btn-action-b" id="btn-b" aria-label="Button B">B</button>
             <button class="btn-action btn-action-a" id="btn-a" aria-label="Button A">A</button>
           </div>
@@ -265,13 +271,27 @@
           <button class="btn-close-modal" data-close="modal-settings">✕</button>
         </div>
         <div class="modal-content">
+          <div class="setting-group" style="flex-direction: column; align-items: stretch; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label>⚡ Tốc độ Tua Nhanh (Fast-Forward):</label>
+              <span id="speed-val-display" style="font-weight: 800; color: var(--accent-cyan);">2.0x</span>
+            </div>
+            <input type="range" id="setting-speed" min="1.0" max="5.0" step="0.25" value="2.0" style="accent-color: var(--accent-cyan); width: 100%; cursor: pointer;" />
+            <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--text-dim);">
+              <span>1.0x</span>
+              <span>2.0x</span>
+              <span>3.0x</span>
+              <span>4.0x</span>
+              <span>5.0x</span>
+            </div>
+          </div>
+
           <div class="setting-group">
-            <label>⚡ Tốc độ Tua Nhanh (Fast-Forward):</label>
-            <select class="setting-select" id="setting-speed">
-              <option value="1.5">1.5x</option>
-              <option value="2.0" selected>2.0x</option>
-              <option value="4.0">4.0x</option>
-              <option value="8.0">8.0x</option>
+            <label>🕹️ Kiểu di chuyển:</label>
+            <select class="setting-select" id="setting-control-type">
+              <option value="dpad" selected>D-Pad (Phím chữ thập)</option>
+              <option value="fixed">Joystick Cố Định</option>
+              <option value="floating">Joystick Tự Do (Chạm đâu hiện đó)</option>
             </select>
           </div>
 
@@ -294,7 +314,30 @@
             <label>📳 Rung phản hồi (Haptic):</label>
             <input type="checkbox" id="setting-haptic" checked style="transform: scale(1.3); accent-color: var(--accent-cyan);" />
           </div>
+
+          <div class="setting-group" style="border-bottom: none; margin-top: 8px;">
+            <button class="tool-btn" id="btn-open-layout-editor" style="width: 100%; background: linear-gradient(135deg, var(--accent-purple), var(--accent-magenta)); color: #fff; font-weight: 700; height: 42px; border-radius: 10px; border: none; box-shadow: 0 4px 14px rgba(255, 0, 127, 0.3);">
+              📐 Chỉnh Sửa Vị Trí & Kích Thước Phím
+            </button>
+          </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Layout Editor Overlay -->
+    <div id="layout-editor-overlay" class="layout-editor-overlay" style="display: none;">
+      <div class="layout-editor-toolbar">
+        <span class="layout-editor-title">📐 Chỉnh Bố Cục</span>
+        <div class="layout-editor-actions">
+          <button class="tool-btn btn-mini" id="btn-layout-scale-down" title="Thu nhỏ nút đang chọn">➖ Thu nhỏ</button>
+          <span id="layout-scale-badge" class="layout-scale-badge">100%</span>
+          <button class="tool-btn btn-mini" id="btn-layout-scale-up" title="Phóng to nút đang chọn">➕ Phóng to</button>
+          <button class="tool-btn btn-mini btn-danger" id="btn-layout-reset" title="Đặt lại vị trí mặc định">↺ Mặc định</button>
+          <button class="btn-play-rom btn-mini" id="btn-layout-save" style="padding: 6px 14px;">💾 Lưu & Thoát</button>
+        </div>
+      </div>
+      <div class="layout-editor-hint">
+        👉 Nhấn chọn nút (sẽ có viền sáng) rồi kéo để di chuyển. Dùng ➕ / ➖ để chỉnh to/nhỏ.
       </div>
     </div>
   </div>
