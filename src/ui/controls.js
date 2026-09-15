@@ -457,12 +457,14 @@ export class GBAControls {
 
     // Floating joystick can be spawned anywhere in left half of screen
     window.addEventListener('touchstart', (e) => {
+      const menu = document.getElementById('hamburger-dropdown');
+      if (menu && menu.classList.contains('open')) return;
       if (this.isEditingLayout || this.movementMode !== 'floating' || activeTouchId !== null) return;
       for (let i = 0; i < e.changedTouches.length; i++) {
         const t = e.changedTouches[i];
         if (t.clientX < window.innerWidth * 0.55 && t.clientY > 44) {
           const target = document.elementFromPoint(t.clientX, t.clientY);
-          if (!target || !target.closest('button, .top-toolbar, .modal-backdrop, .layout-editor-overlay')) {
+          if (!target || !target.closest('button, .top-toolbar, .dropdown-menu, .modal-backdrop, .layout-editor-overlay')) {
             activeTouchId = t.identifier;
             startStick(t.clientX, t.clientY);
             break;

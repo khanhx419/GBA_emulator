@@ -219,16 +219,37 @@ html, body {
   background: rgba(20, 22, 36, 0.98);
   border: 1px solid var(--glass-border);
   border-radius: 12px;
-  padding: 6px;
-  min-width: 230px;
+  padding: 8px 8px 24px 8px;
+  min-width: 250px;
+  max-width: 330px;
+  max-height: calc(100dvh - 54px);
+  max-height: calc(100vh - 54px);
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior: contain;
+  touch-action: pan-y !important;
   display: none;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85);
   backdrop-filter: blur(20px);
   z-index: 1100;
   transform-origin: top right;
   animation: dropdownIn 0.15s ease-out forwards;
+}
+
+.dropdown-menu * {
+  touch-action: pan-y manipulation;
+}
+
+.dropdown-menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+.dropdown-menu::-webkit-scrollbar-thumb {
+  background: rgba(0, 242, 254, 0.35);
+  border-radius: 4px;
 }
 
 .dropdown-menu.open {
