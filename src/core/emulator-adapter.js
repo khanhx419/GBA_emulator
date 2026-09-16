@@ -1,171 +1,152 @@
-import { GBA } from './gba.js';
-
 /**
- * EmulatorAdapter — Dual-engine Bridge layer for GBA_K.
+ * EmulatorAdapter v2 — Correct integration with EmulatorJS.
  * 
- * Primary: EmulatorJS WASM core (mGBA) — executes at 60 FPS near-native speed.
- * Fallback: Native JavaScript engine (GBA class) — active when offline, when
- *           WASM fails to load, or when explicitly chosen in Settings.
- * 
- * Exposes the exact same interface as GBA class so UI code in main.js
- * requires zero special branches.
+ * Architecture:
+ * - EmulatorJS renders DIRECTLY into the canvas-wrapper area (no canvas copy hack)
+ * - GBA_K UI controls (virtual buttons, menu, modals) overlay on top
+ * - EmulatorJS default UI (toolbar, virtual gamepad) is hidden via CSS
+ * - ROM loading: each new ROM creates a fresh EmulatorJS instance with blob URL
+ * - Input: our controls → gameManager.simulateInput()
+ * - Save/Load: gameManager state API
+ * - Cheats: gameManager.setCheat / resetCheat
+ * - Speed: gameManager.toggleFastForward / setFastForwardRatio
  */
 
 export class EmulatorAdapter {
   constructor(canvas) {
     this.canvas = canvas;
     this.ejsReady = false;
-    this.ejsPlayer = null;
-    this.useFallback = false;
-    this.fallbackGba = null;
+    this.ejsInstance = null;
 
-    // Check user preference in localStorage
-    const pref = localStorage.getItem('gba_k_engine') || 'wasm';
-    if (pref === 'js') {
-      this._initFallbackDirect();
-      return;
-    }
-
-    // State flags
-    this._running = false;
-    this._paused = false;
-    this._romLoaded = false;
+    // State flags (same API as GBA class)
+    this.running = false;
+    this.paused = false;
+    this.romLoaded = false;
     this.romName = 'No ROM Loaded';
     this.romTitle = '';
 
-    // Speed / Fast Forward
+    // Speed
     this.speed = 1.0;
     this._fastForward = false;
     this._speedMultiplier = 2.0;
 
-    // Performance / FPS
+    // FPS
     this.fps = 0;
-    this._onFpsUpdate = null;
+    this.onFpsUpdate = null;
+    this._fpsFrames = 0;
+    this._fpsLastTime = performance.now();
 
-    // Freeze list & Cheats (for WASM compatibility)
+    // Freeze list (limited in WASM mode)
     this.freezeList = [];
+
+    // Cheats
     this._cheats = [];
 
-    // Pending ROM queue
-    this._pendingRom = null;
-    this._pendingRomName = null;
+    // Create the EJS container inside canvas-wrapper
+    this._setupContainer();
 
-    // Initialize EmulatorJS WASM
-    this._initEmulatorJS();
-
-    // Safety timeout: if WASM doesn't initialize in 4.5s (offline or CDN blocked), fallback to JS
-    this._fallbackTimer = setTimeout(() => {
-      if (!this.ejsReady && !this.useFallback) {
-        console.warn('[GBA_K] EmulatorJS WASM timed out. Falling back to JavaScript engine.');
-        this._triggerFallback();
-      }
-    }, 4500);
+    // Inject CSS to hide EmulatorJS default UI
+    this._injectHideCSS();
   }
 
-  _initFallbackDirect() {
-    console.log('[GBA_K] Using JavaScript Engine by user preference.');
-    this.useFallback = true;
-    this.fallbackGba = new GBA(this.canvas);
-  }
+  // ===== SETUP =====
 
-  _triggerFallback() {
-    if (this.useFallback || this.ejsReady) return;
-    this.useFallback = true;
-    this.fallbackGba = new GBA(this.canvas);
-    if (this._onFpsUpdate) {
-      this.fallbackGba.onFpsUpdate = this._onFpsUpdate;
-    }
-    if (this._fastForward) {
-      this.fallbackGba.fastForward = this._fastForward;
-    }
-    this.fallbackGba.speedMultiplier = this._speedMultiplier;
-
-    if (this._pendingRom) {
-      const rom = this._pendingRom;
-      const name = this._pendingRomName;
-      this._pendingRom = null;
-      this._pendingRomName = null;
-      this.fallbackGba.loadRom(rom, name);
-    }
-  }
-
-  // --- Properties with fallback forwarding ---
-
-  get running() {
-    return this.useFallback ? this.fallbackGba.running : this._running;
-  }
-  set running(v) {
-    if (this.useFallback) this.fallbackGba.running = v;
-    else this._running = v;
-  }
-
-  get paused() {
-    return this.useFallback ? this.fallbackGba.paused : this._paused;
-  }
-  set paused(v) {
-    if (this.useFallback) this.fallbackGba.paused = v;
-    else this._paused = v;
-  }
-
-  get romLoaded() {
-    return this.useFallback ? this.fallbackGba.romLoaded : this._romLoaded;
-  }
-  set romLoaded(v) {
-    if (this.useFallback) this.fallbackGba.romLoaded = v;
-    else this._romLoaded = v;
-  }
-
-  get speedMultiplier() {
-    return this.useFallback ? this.fallbackGba.speedMultiplier : this._speedMultiplier;
-  }
-  set speedMultiplier(val) {
-    this._speedMultiplier = val;
-    if (this.useFallback) {
-      this.fallbackGba.speedMultiplier = val;
-    } else {
-      this._applySpeed();
-    }
-  }
-
-  get fastForward() {
-    return this.useFallback ? this.fallbackGba.fastForward : this._fastForward;
-  }
-  set fastForward(val) {
-    this._fastForward = val;
-    if (this.useFallback) {
-      this.fallbackGba.fastForward = val;
-    } else {
-      this._applySpeed();
-    }
-  }
-
-  get onFpsUpdate() {
-    return this.useFallback ? this.fallbackGba.onFpsUpdate : this._onFpsUpdate;
-  }
-  set onFpsUpdate(cb) {
-    this._onFpsUpdate = cb;
-    if (this.useFallback && this.fallbackGba) {
-      this.fallbackGba.onFpsUpdate = cb;
-    }
-  }
-
-  // --- EmulatorJS Init & Lifecycle ---
-
-  _initEmulatorJS() {
+  _setupContainer() {
+    // Find the canvas wrapper and create an EJS container inside it
+    const wrapper = this.canvas.parentElement; // #canvas-wrapper
+    
     this._ejsContainer = document.createElement('div');
-    this._ejsContainer.id = 'ejs-container';
-    this._ejsContainer.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;z-index:-1;';
-    document.body.appendChild(this._ejsContainer);
+    this._ejsContainer.id = 'ejs-game-container';
+    this._ejsContainer.style.cssText = `
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      z-index: 1; display: none;
+    `;
+    wrapper.style.position = 'relative';
+    wrapper.appendChild(this._ejsContainer);
 
-    window.EJS_player = '#ejs-container';
+    // Hide the original canvas — EmulatorJS will provide its own
+    this.canvas.style.display = 'none';
+  }
+
+  _injectHideCSS() {
+    const style = document.createElement('style');
+    style.textContent = `
+      /* Hide ALL EmulatorJS default UI elements — we use our own */
+      .ejs_parent .ejs_bar,
+      .ejs_parent .ejs_bottom_bar,
+      .ejs_parent .ejs_bottom_bar_area,
+      .ejs_parent .ejs_context_menu,
+      .ejs_parent .ejs_virtualGamepad_container,
+      .ejs_parent .ejs_menu_bar,
+      .ejs_parent .ejs_menu_bar_hidden,
+      .ejs_parent .ejs_cheat_menu,
+      .ejs_parent .ejs_control_bar,
+      .ejs_parent [class*="ejs_menu"],
+      .ejs_parent [class*="ejs_popup"],
+      .ejs_parent .ejs_loading_text,
+      .ejs_start_button {
+        display: none !important;
+        pointer-events: none !important;
+      }
+      /* Make the EJS canvas fill our container */
+      #ejs-game-container {
+        background: #000;
+      }
+      #ejs-game-container .ejs_parent {
+        width: 100% !important;
+        height: 100% !important;
+      }
+      #ejs-game-container canvas {
+        width: 100% !important;
+        height: 100% !important;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // ===== ROM LOADING =====
+
+  loadRom(arrayBuffer, fileName = 'game.gba') {
+    this.romName = fileName;
+
+    // Extract title from ROM header
+    const data = new Uint8Array(arrayBuffer);
+    let title = '';
+    for (let i = 0xA0; i < 0xAC; i++) {
+      const ch = data[i];
+      if (ch === 0) break;
+      title += String.fromCharCode(ch);
+    }
+    this.romTitle = title.trim() || fileName.replace(/\.[^/.]+$/, '');
+
+    // Destroy existing instance if any
+    this._destroyEJS();
+
+    // Create blob URL for the ROM
+    const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    // Show the EJS container
+    this._ejsContainer.style.display = 'block';
+    this._ejsContainer.innerHTML = ''; // Clear previous
+
+    // Configure EmulatorJS globals
+    window.EJS_player = '#ejs-game-container';
     window.EJS_core = 'gba';
-    window.EJS_gameName = 'GBA_K';
-    window.EJS_color = '#1a1a2e';
-    window.EJS_startOnLoaded = false;
-    window.EJS_threads = false; // Single thread mode for Android WebView
-    window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+    window.EJS_gameUrl = blobUrl;
+    window.EJS_gameName = this.romTitle;
+    window.EJS_color = '#000000';
+    window.EJS_backgroundColor = '#000000';
+    window.EJS_startOnLoaded = true;  // Auto-start, no "Start Game" button
+    window.EJS_threads = false;       // Single-thread for Android WebView
+    window.EJS_pathtodata = '/emulatorjs/'; // LOCAL files, not CDN!
     window.EJS_DEBUG_XX = false;
+    window.EJS_language = 'vi';
+    window.EJS_noAutoFocus = true;
 
+    // Disable ALL EmulatorJS UI
     window.EJS_Buttons = {
       playPause: false, restart: false, mute: false, settings: false,
       fullscreen: false, saveState: false, loadState: false,
@@ -175,289 +156,234 @@ export class EmulatorAdapter {
     };
     window.EJS_VirtualGamepadSettings = { type: 'none' };
 
-    const dummyRom = this._createMinimalGbaRom();
-    const blob = new Blob([dummyRom], { type: 'application/octet-stream' });
-    window.EJS_gameUrl = URL.createObjectURL(blob);
+    // Set up callbacks
+    window.EJS_onGameStart = () => {
+      console.log('[GBA_K] WASM game started!');
+      this.ejsReady = true;
+      this.running = true;
+      this.paused = false;
+      this.romLoaded = true;
+      this.ejsInstance = window.EJS_emulator;
+      this._startFpsCounter();
+      this._loadCheatsFromStorage();
+      this.loadFreezeList();
 
-    this._loadEJSScript();
+      // Apply speed if fast forward was on
+      if (this._fastForward) {
+        this._applySpeed();
+      }
+    };
+
+    // Load EmulatorJS — it will download core WASM, then start the game
+    this._loadEJS();
+
+    return true;
   }
 
-  _createMinimalGbaRom() {
-    const rom = new Uint8Array(256);
-    rom[0] = 0x2E; rom[1] = 0x00; rom[2] = 0x00; rom[3] = 0xEA;
-    const title = 'GBA_K       ';
-    for (let i = 0; i < 12; i++) rom[0xA0 + i] = title.charCodeAt(i);
-    rom[0xAC] = 0x41; rom[0xAD] = 0x47; rom[0xAE] = 0x42; rom[0xAF] = 0x4B;
-    let chk = 0;
-    for (let i = 0xA0; i < 0xBD; i++) chk -= rom[i];
-    rom[0xBD] = (chk - 0x19) & 0xFF;
-    return rom;
-  }
+  _loadEJS() {
+    // Remove any previous EmulatorJS scripts to prevent conflicts
+    document.querySelectorAll('script[data-ejs-loader]').forEach(s => s.remove());
 
-  _loadEJSScript() {
     const script = document.createElement('script');
-    script.src = window.EJS_pathtodata + 'loader.js';
+    script.src = '/emulatorjs/loader.js';
+    script.setAttribute('data-ejs-loader', 'true');
     script.async = true;
     script.onload = () => {
-      console.log('[GBA_K] EmulatorJS loader loaded');
-      this._waitForEJS();
+      console.log('[GBA_K] EmulatorJS loader initialized');
     };
     script.onerror = () => {
-      console.warn('[GBA_K] Failed to load EmulatorJS CDN script. Falling back to JS engine.');
-      this._triggerFallback();
+      console.error('[GBA_K] Failed to load EmulatorJS');
+      // Show error to user
+      this._ejsContainer.innerHTML = '<div style="color:#ff4444;text-align:center;padding:20px;font-size:14px;">Không tải được WASM engine. Hãy chuyển sang JavaScript Engine trong Cài đặt.</div>';
     };
     document.head.appendChild(script);
   }
 
-  _waitForEJS() {
-    let attempts = 0;
-    const check = () => {
-      if (this.useFallback) return;
-      if (window.EJS_emulator) {
-        this._onEJSReady(window.EJS_emulator);
-      } else if (attempts++ < 60) {
-        setTimeout(check, 100);
-      } else {
-        this._triggerFallback();
+  _destroyEJS() {
+    if (this.ejsInstance) {
+      try {
+        this.ejsInstance.callEvent('exit');
+      } catch (e) {
+        console.warn('[GBA_K] Error destroying EJS:', e);
       }
-    };
-    check();
-  }
-
-  _onEJSReady(emulator) {
-    if (this._fallbackTimer) clearTimeout(this._fallbackTimer);
-    this.ejsPlayer = emulator;
-    this.ejsReady = true;
-    console.log('[GBA_K] EmulatorJS mGBA WASM core is ready!');
-
-    this._hookVideoOutput();
-    this._startFpsCounter();
-
-    if (this._pendingRom) {
-      this._loadRomIntoEJS(this._pendingRom, this._pendingRomName);
-      this._pendingRom = null;
-      this._pendingRomName = null;
+      this.ejsInstance = null;
     }
-  }
-
-  _hookVideoOutput() {
-    if (!this.ejsPlayer) return;
-    const ejsCanvas = this._ejsContainer.querySelector('canvas');
-    if (!ejsCanvas) return;
-
-    const ctx = this.canvas.getContext('2d', { alpha: false, desynchronized: true });
-    const copyFrame = () => {
-      if (this._running && !this._paused && ejsCanvas.width > 0 && ejsCanvas.height > 0) {
-        try {
-          ctx.drawImage(ejsCanvas, 0, 0, this.canvas.width, this.canvas.height);
-        } catch (e) {}
-      }
-      this._videoRafId = requestAnimationFrame(copyFrame);
-    };
-    copyFrame();
-  }
-
-  _startFpsCounter() {
-    let lastTime = performance.now();
-    let frames = 0;
-    const tick = () => {
-      frames++;
-      const now = performance.now();
-      if (now - lastTime >= 1000) {
-        this.fps = frames;
-        frames = 0;
-        lastTime = now;
-        if (this._onFpsUpdate) this._onFpsUpdate(this.fps);
-      }
-      this._fpsRafId = requestAnimationFrame(tick);
-    };
-    tick();
-  }
-
-  // --- Public Emulation Controls ---
-
-  loadRom(arrayBuffer, fileName = 'game.gba') {
-    if (this.useFallback) {
-      return this.fallbackGba.loadRom(arrayBuffer, fileName);
-    }
-
-    this.romName = fileName;
-    this.romTitle = fileName.replace(/\.[^/.]+$/, '');
-
-    if (!this.ejsReady) {
-      this._pendingRom = arrayBuffer;
-      this._pendingRomName = fileName;
-      console.log('[GBA_K] ROM queued while waiting for WASM core');
-      return true;
-    }
-
-    return this._loadRomIntoEJS(arrayBuffer, fileName);
-  }
-
-  _loadRomIntoEJS(arrayBuffer, fileName) {
-    try {
-      const data = new Uint8Array(arrayBuffer);
-      let title = '';
-      for (let i = 0xA0; i < 0xAC; i++) {
-        const ch = data[i];
-        if (ch === 0) break;
-        title += String.fromCharCode(ch);
-      }
-      this.romTitle = title.trim() || fileName.replace(/\.[^/.]+$/, '');
-
-      if (this.ejsPlayer && this.ejsPlayer.gameManager) {
-        const gm = this.ejsPlayer.gameManager;
-        const romPath = '/' + fileName;
-        if (gm.FS) {
-          try { gm.FS.unlink(romPath); } catch (e) {}
-          gm.FS.writeFile(romPath, data);
-          if (gm.loadState) gm.loadState(romPath);
-        }
-      }
-
-      this._romLoaded = true;
-      this._running = true;
-      this._paused = false;
-
-      if (this.ejsPlayer && this.ejsPlayer.play) {
-        this.ejsPlayer.play();
-      }
-
-      this._loadCheatsFromStorage();
-      return true;
-    } catch (e) {
-      console.error('[GBA_K] Error loading ROM into WASM:', e);
-      this._triggerFallback();
-      return this.fallbackGba.loadRom(arrayBuffer, fileName);
+    this.ejsReady = false;
+    // Clean up global EJS state
+    delete window.EJS_emulator;
+    delete window.EJS_onGameStart;
+    // Stop FPS counter
+    if (this._fpsRafId) {
+      cancelAnimationFrame(this._fpsRafId);
+      this._fpsRafId = null;
     }
   }
 
   getRomTitle() {
-    if (this.useFallback) return this.fallbackGba.getRomTitle();
     return this.romTitle || this.romName.replace(/\.[^/.]+$/, '');
   }
 
+  // ===== EMULATION CONTROLS =====
+
   reset() {
-    if (this.useFallback) return this.fallbackGba.reset();
-    if (this.ejsPlayer && this.ejsPlayer.gameManager && this.ejsPlayer.gameManager.restart) {
-      this.ejsPlayer.gameManager.restart();
+    if (this.ejsInstance && this.ejsInstance.gameManager) {
+      this.ejsInstance.gameManager.restart();
     }
   }
 
   start() {
-    if (this.useFallback) return this.fallbackGba.start();
-    if (!this._romLoaded) return;
-    this._running = true;
-    this._paused = false;
-    if (this.ejsPlayer && this.ejsPlayer.play) this.ejsPlayer.play();
-  }
-
-  pause() {
-    if (this.useFallback) return this.fallbackGba.pause();
-    this._paused = true;
-    if (this.ejsPlayer && this.ejsPlayer.pause) this.ejsPlayer.pause();
-  }
-
-  resume() {
-    if (this.useFallback) return this.fallbackGba.resume();
-    if (this._romLoaded && this._paused) {
-      this._paused = false;
-      if (this.ejsPlayer && this.ejsPlayer.play) this.ejsPlayer.play();
+    if (!this.romLoaded) return;
+    this.running = true;
+    this.paused = false;
+    if (this.ejsInstance && this.ejsInstance.gameManager) {
+      this.ejsInstance.gameManager.toggleMainLoop(1);
     }
   }
 
-  // --- Key Input ---
+  pause() {
+    this.paused = true;
+    if (this.ejsInstance && this.ejsInstance.gameManager) {
+      this.ejsInstance.gameManager.toggleMainLoop(0);
+    }
+  }
+
+  resume() {
+    if (this.romLoaded && this.paused) {
+      this.paused = false;
+      if (this.ejsInstance && this.ejsInstance.gameManager) {
+        this.ejsInstance.gameManager.toggleMainLoop(1);
+      }
+    }
+  }
+
+  // ===== INPUT =====
 
   setKeyDown(keyBit) {
-    if (this.useFallback) return this.fallbackGba.setKeyDown(keyBit);
-    if (!this.ejsPlayer || !this.ejsPlayer.gameManager) return;
-    const gm = this.ejsPlayer.gameManager;
+    if (!this.ejsInstance || !this.ejsInstance.gameManager) return;
     const btn = this._keyBitToEJSButton(keyBit);
-    if (btn !== -1 && gm.simulateInput) {
-      gm.simulateInput(0, btn, 1);
+    if (btn !== -1) {
+      this.ejsInstance.gameManager.simulateInput(0, btn, 1);
     }
   }
 
   setKeyUp(keyBit) {
-    if (this.useFallback) return this.fallbackGba.setKeyUp(keyBit);
-    if (!this.ejsPlayer || !this.ejsPlayer.gameManager) return;
-    const gm = this.ejsPlayer.gameManager;
+    if (!this.ejsInstance || !this.ejsInstance.gameManager) return;
     const btn = this._keyBitToEJSButton(keyBit);
-    if (btn !== -1 && gm.simulateInput) {
-      gm.simulateInput(0, btn, 0);
+    if (btn !== -1) {
+      this.ejsInstance.gameManager.simulateInput(0, btn, 0);
     }
   }
 
   _keyBitToEJSButton(keyBit) {
+    // GBA_K KEYS → RetroArch/Libretro button indices
+    // RetroArch GBA mapping: 0=B, 1=Y(n/a), 2=Select, 3=Start,
+    // 4=Up, 5=Down, 6=Left, 7=Right, 8=A, 9=X(n/a), 10=L, 11=R
     const map = {
-      0x0001: 8,   // A -> 8
-      0x0002: 0,   // B -> 0
-      0x0004: 2,   // SELECT -> 2
-      0x0008: 3,   // START -> 3
-      0x0010: 7,   // RIGHT -> 7
-      0x0020: 6,   // LEFT -> 6
-      0x0040: 4,   // UP -> 4
-      0x0080: 5,   // DOWN -> 5
-      0x0100: 10,  // R -> 10
-      0x0200: 11,  // L -> 11
+      0x0001: 8,   // A
+      0x0002: 0,   // B
+      0x0004: 2,   // SELECT
+      0x0008: 3,   // START
+      0x0010: 7,   // RIGHT
+      0x0020: 6,   // LEFT
+      0x0040: 4,   // UP
+      0x0080: 5,   // DOWN
+      0x0100: 10,  // R
+      0x0200: 11,  // L
     };
     return map[keyBit] ?? -1;
   }
 
-  // --- Save / Load State ---
+  // ===== SPEED / FAST FORWARD =====
+
+  get fastForward() { return this._fastForward; }
+  set fastForward(val) {
+    this._fastForward = val;
+    this._applySpeed();
+  }
+
+  get speedMultiplier() { return this._speedMultiplier; }
+  set speedMultiplier(val) {
+    this._speedMultiplier = val;
+    this._applySpeed();
+  }
+
+  _applySpeed() {
+    if (!this.ejsInstance || !this.ejsInstance.gameManager) return;
+    const gm = this.ejsInstance.gameManager;
+    if (this._fastForward) {
+      gm.toggleFastForward(1);
+      gm.setFastForwardRatio(this._speedMultiplier);
+    } else {
+      gm.toggleFastForward(0);
+    }
+  }
+
+  // ===== SAVE / LOAD STATE =====
 
   saveState(slot = 1) {
-    if (this.useFallback) return this.fallbackGba.saveState(slot);
-    if (!this._romLoaded || !this.ejsPlayer) return null;
+    if (!this.romLoaded || !this.ejsInstance || !this.ejsInstance.gameManager) return null;
 
     try {
-      let stateData = null;
-      if (this.ejsPlayer.gameManager && this.ejsPlayer.gameManager.getState) {
-        stateData = this.ejsPlayer.gameManager.getState();
-      }
+      const gm = this.ejsInstance.gameManager;
+      const stateInfo = gm.saveStateInfo();
+      
+      // Save state to FS
+      const statePath = `/data/saves/state_slot${slot}.state`;
+      gm.loadState(statePath, 1); // 1 = save
+
+      // Read back the state file
+      let stateData = [];
+      try {
+        stateData = Array.from(gm.FS.readFile(statePath));
+      } catch (e) {}
+
+      // Get screenshot from the EJS canvas
+      let screenshot = null;
+      try {
+        const ejsCanvas = this._ejsContainer.querySelector('canvas');
+        if (ejsCanvas) screenshot = ejsCanvas.toDataURL('image/jpeg', 0.8);
+      } catch (e) {}
 
       const stateObj = {
         version: 2,
         engine: 'emulatorjs',
         romTitle: this.romTitle,
         timestamp: Date.now(),
-        state: stateData ? Array.from(new Uint8Array(stateData)) : [],
-        screenshot: this.canvas ? this.canvas.toDataURL('image/jpeg', 0.8) : null
+        state: stateData,
+        screenshot
       };
 
       localStorage.setItem(`myboy_savestate_${this.romTitle}_slot${slot}`, JSON.stringify(stateObj));
       return stateObj;
     } catch (e) {
-      console.warn('[GBA_K] Error saving state:', e);
+      console.warn('[GBA_K] Save state error:', e);
       return null;
     }
   }
 
   loadState(slot = 1) {
-    if (this.useFallback) return this.fallbackGba.loadState(slot);
-    if (!this._romLoaded || !this.ejsPlayer) return false;
+    if (!this.romLoaded || !this.ejsInstance || !this.ejsInstance.gameManager) return false;
 
     try {
       const json = localStorage.getItem(`myboy_savestate_${this.romTitle}_slot${slot}`);
       if (!json) return false;
       const stateObj = JSON.parse(json);
 
-      if (stateObj.engine === 'emulatorjs' && stateObj.state && this.ejsPlayer.gameManager) {
-        const gm = this.ejsPlayer.gameManager;
-        if (gm.loadState) {
-          gm.loadState(new Uint8Array(stateObj.state));
-          return true;
-        }
+      if (stateObj.engine === 'emulatorjs' && stateObj.state) {
+        const gm = this.ejsInstance.gameManager;
+        const statePath = `/data/saves/state_slot${slot}.state`;
+        gm.FS.writeFile(statePath, new Uint8Array(stateObj.state));
+        gm.loadState(statePath, 0); // 0 = load
+        return true;
       }
       return false;
     } catch (e) {
-      console.error('[GBA_K] Error loading state:', e);
+      console.error('[GBA_K] Load state error:', e);
       return false;
     }
   }
 
   getStateInfo(slot = 1) {
-    if (this.useFallback) return this.fallbackGba.getStateInfo(slot);
     try {
       const json = localStorage.getItem(`myboy_savestate_${this.romTitle}_slot${slot}`);
       if (!json) return null;
@@ -468,47 +394,9 @@ export class EmulatorAdapter {
     }
   }
 
-  // --- Battery Saves (.sav) ---
-
-  exportSavFile() {
-    if (this.useFallback) return this.fallbackGba.exportSavFile();
-    if (!this._romLoaded || !this.ejsPlayer) return;
-    try {
-      const gm = this.ejsPlayer.gameManager;
-      if (gm && gm.getSave) {
-        const saveData = gm.getSave();
-        if (saveData) {
-          const blob = new Blob([saveData], { type: 'application/octet-stream' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${this.romTitle || 'game'}.sav`;
-          a.click();
-          URL.revokeObjectURL(url);
-        }
-      }
-    } catch (e) {
-      console.warn('[GBA_K] Error exporting save:', e);
-    }
-  }
-
-  importSavFile(arrayBuffer) {
-    if (this.useFallback) return this.fallbackGba.importSavFile(arrayBuffer);
-    if (!this.ejsPlayer) return;
-    try {
-      const gm = this.ejsPlayer.gameManager;
-      if (gm && gm.loadSave) {
-        gm.loadSave(new Uint8Array(arrayBuffer));
-      }
-    } catch (e) {
-      console.warn('[GBA_K] Error importing save:', e);
-    }
-  }
-
-  // --- Cheats ---
+  // ===== CHEATS =====
 
   get cheats() {
-    if (this.useFallback) return this.fallbackGba.cheats;
     const self = this;
     return {
       get cheats() { return self._cheats; },
@@ -532,35 +420,41 @@ export class EmulatorAdapter {
         }
       },
       loadFromStorage() { self._loadCheatsFromStorage(); },
-      applyCheats() {}
+      applyCheats() { /* handled by mGBA core internally */ }
     };
   }
 
   _applyCheatsToEJS() {
-    if (!this.ejsPlayer || !this.ejsPlayer.gameManager) return;
-    const gm = this.ejsPlayer.gameManager;
-    if (gm.resetCheats) gm.resetCheats();
+    if (!this.ejsInstance || !this.ejsInstance.gameManager) return;
+    const gm = this.ejsInstance.gameManager;
+
+    // Reset all cheats first
+    gm.resetCheat();
+
+    // Apply enabled cheats
+    let idx = 0;
     for (const cheat of this._cheats) {
       if (!cheat.enabled) continue;
       const lines = cheat.code.trim().split(/[\n\r]+/);
       for (const line of lines) {
         const clean = line.replace(/\s+/g, ' ').trim();
-        if (clean && gm.addCheat) gm.addCheat(clean);
+        if (clean) {
+          gm.setCheat(idx, 1, clean); // index, enabled, code
+          idx++;
+        }
       }
     }
   }
 
   _saveCheatsToStorage() {
     try {
-      const key = 'myboy_cheats_' + (this.romTitle || 'default');
-      localStorage.setItem(key, JSON.stringify(this._cheats));
+      localStorage.setItem('myboy_cheats_' + (this.romTitle || 'default'), JSON.stringify(this._cheats));
     } catch (e) {}
   }
 
   _loadCheatsFromStorage() {
     try {
-      const key = 'myboy_cheats_' + (this.romTitle || 'default');
-      const data = localStorage.getItem(key);
+      const data = localStorage.getItem('myboy_cheats_' + (this.romTitle || 'default'));
       this._cheats = data ? JSON.parse(data) : [];
       this._applyCheatsToEJS();
     } catch (e) {
@@ -568,65 +462,124 @@ export class EmulatorAdapter {
     }
   }
 
-  // --- Speed & Audio ---
-
-  _applySpeed() {
-    if (!this.ejsPlayer || !this.ejsPlayer.gameManager) return;
-    const gm = this.ejsPlayer.gameManager;
-    const targetSpeed = this._fastForward ? this._speedMultiplier : this.speed;
-    if (gm.setFastForwardRatio) gm.setFastForwardRatio(targetSpeed);
-    if (gm.setSpeed) gm.setSpeed(targetSpeed);
-  }
+  // ===== AUDIO =====
 
   get apu() {
-    if (this.useFallback) return this.fallbackGba.apu;
     const self = this;
     return {
       setVolume(v) {
-        const vol = Math.max(0, Math.min(1, v));
-        if (self.ejsPlayer && self.ejsPlayer.gameManager && self.ejsPlayer.gameManager.setVolume) {
-          self.ejsPlayer.gameManager.setVolume(vol);
+        if (self.ejsInstance && self.ejsInstance.setVolume) {
+          self.ejsInstance.setVolume(Math.max(0, Math.min(1, v)));
         }
       }
     };
   }
 
-  // --- Memory Scanner & Freeze List Compatibility ---
+  // ===== FPS COUNTER =====
 
-  applyFreezes() {
-    if (this.useFallback) return this.fallbackGba.applyFreezes();
+  _startFpsCounter() {
+    if (this._fpsRafId) cancelAnimationFrame(this._fpsRafId);
+    this._fpsFrames = 0;
+    this._fpsLastTime = performance.now();
+
+    const tick = () => {
+      this._fpsFrames++;
+      const now = performance.now();
+      if (now - this._fpsLastTime >= 1000) {
+        this.fps = this._fpsFrames;
+        this._fpsFrames = 0;
+        this._fpsLastTime = now;
+        if (this.onFpsUpdate) this.onFpsUpdate(this.fps);
+      }
+      this._fpsRafId = requestAnimationFrame(tick);
+    };
+    tick();
   }
 
+  // ===== BATTERY SAVE =====
+
+  exportSavFile() {
+    if (!this.romLoaded || !this.ejsInstance || !this.ejsInstance.gameManager) return;
+    try {
+      const gm = this.ejsInstance.gameManager;
+      gm.saveSaveFiles();
+      const savePath = gm.getSaveFilePath();
+      if (savePath) {
+        const saveData = gm.FS.readFile(savePath);
+        const blob = new Blob([saveData], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${this.romTitle || 'game'}.sav`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      console.warn('[GBA_K] Export save error:', e);
+    }
+  }
+
+  importSavFile(arrayBuffer) {
+    if (!this.ejsInstance || !this.ejsInstance.gameManager) return;
+    try {
+      const gm = this.ejsInstance.gameManager;
+      const savePath = gm.getSaveFilePath();
+      if (savePath) {
+        gm.FS.writeFile(savePath, new Uint8Array(arrayBuffer));
+        gm.loadSaveFiles();
+      }
+    } catch (e) {
+      console.warn('[GBA_K] Import save error:', e);
+    }
+  }
+
+  // ===== FREEZE LIST (limited in WASM) =====
+
+  applyFreezes() { /* No-op in WASM mode — use cheats instead */ }
+
   addFreeze(address, value, dataType) {
-    if (this.useFallback) return this.fallbackGba.addFreeze(address, value, dataType);
     this.freezeList = this.freezeList.filter(f => f.address !== address);
     this.freezeList.push({ address, value, dataType });
+    this.saveFreezeList();
   }
 
   removeFreeze(address) {
-    if (this.useFallback) return this.fallbackGba.removeFreeze(address);
     this.freezeList = this.freezeList.filter(f => f.address !== address);
+    this.saveFreezeList();
   }
 
+  saveFreezeList() {
+    try {
+      localStorage.setItem('myboy_freezes_' + (this.romTitle || 'default'), JSON.stringify(this.freezeList));
+    } catch (e) {}
+  }
+
+  loadFreezeList() {
+    try {
+      const data = localStorage.getItem('myboy_freezes_' + (this.romTitle || 'default'));
+      this.freezeList = data ? JSON.parse(data) : [];
+    } catch (e) {
+      this.freezeList = [];
+    }
+  }
+
+  // ===== MMU BRIDGE (limited in WASM) =====
+
   get mmu() {
-    if (this.useFallback) return this.fallbackGba.mmu;
     return {
       get rom() { return new Uint8Array(0); },
       get romSize() { return 0; },
       get ewram() { return new Uint8Array(0x40000); },
       get iwram() { return new Uint8Array(0x8000); },
-      read8() { return 0; },
-      read16() { return 0; },
-      read32() { return 0; },
-      write8() {},
-      write16() {},
-      write32() {},
+      read8() { return 0; }, read16() { return 0; }, read32() { return 0; },
+      write8() {}, write16() {}, write32() {},
       get saveData() { return new Uint8Array(0); }
     };
   }
 
+  // ===== CORE COMPAT SHIM =====
+
   get core() {
-    if (this.useFallback) return this.fallbackGba.core;
     const self = this;
     return {
       audio: { context: null, masterVolume: 1.0 },
@@ -638,4 +591,9 @@ export class EmulatorAdapter {
       }
     };
   }
+
+  // ===== UNUSED BUT NEEDED FOR API COMPAT =====
+  scheduleNextFrame() {}
+  loop() {}
+  runFrame() {}
 }
