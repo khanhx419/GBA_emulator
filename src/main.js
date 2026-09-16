@@ -16,10 +16,10 @@ window.addEventListener('DOMContentLoaded', () => {
   const hamburgerDropdown = document.getElementById('hamburger-dropdown');
 
   // Initialize GBA Subsystems
-  // Use EmulatorJS WASM core (5-10x faster) by default
-  // Falls back to JS engine if WASM fails to load
-  const useWasm = (localStorage.getItem('gba_k_engine') || 'wasm') === 'wasm';
-  const gba = useWasm ? new EmulatorAdapter(canvas) : new GBA(canvas);
+  // Default: Optimized JS engine (stable, full features including Memory Scanner)
+  // Optional: EmulatorJS WASM core (faster but experimental, set via Settings)
+  const enginePref = localStorage.getItem('gba_k_engine') || 'js';
+  const gba = enginePref === 'wasm' ? new EmulatorAdapter(canvas) : new GBA(canvas);
   const controls = new GBAControls(gba);
   const shaders = new GBAShaders(canvasWrapper);
   const scanner = new GBAMemoryScanner(gba);
@@ -564,11 +564,11 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const engineSelect = document.getElementById('setting-engine');
   if (engineSelect) {
-    engineSelect.value = localStorage.getItem('gba_k_engine') || 'wasm';
+    engineSelect.value = localStorage.getItem('gba_k_engine') || 'js';
     engineSelect.addEventListener('change', (e) => {
       const chosen = e.target.value;
       localStorage.setItem('gba_k_engine', chosen);
-      if (confirm(`Đã đổi động cơ sang ${chosen === 'wasm' ? 'mGBA WebAssembly (Cực nhanh)' : 'JavaScript (Cổ điển)'}. Tải lại ứng dụng ngay để áp dụng?`)) {
+      if (confirm(`Đã đổi động cơ sang ${chosen === 'wasm' ? 'mGBA WebAssembly (Thử nghiệm)' : 'JavaScript Engine (Ổn định)'}. Tải lại ứng dụng ngay để áp dụng?`)) {
         window.location.reload();
       }
     });
