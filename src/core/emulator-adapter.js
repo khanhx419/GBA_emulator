@@ -221,21 +221,20 @@ export class EmulatorAdapter {
     }
   }
 
-  _keyBitToEJSButton(keyBit) {
-    // GBA keys -> RetroArch/Libretro button indices
-    const map = {
-      0x0001: 8,   // A
-      0x0002: 0,   // B
-      0x0004: 2,   // SELECT
-      0x0008: 3,   // START
-      0x0010: 7,   // RIGHT
-      0x0020: 6,   // LEFT
-      0x0040: 4,   // UP
-      0x0080: 5,   // DOWN
-      0x0100: 10,  // R
-      0x0200: 11,  // L
-    };
-    return map[keyBit] ?? -1;
+  _keyBitToEJSButton(key) {
+    // Exact mapping from GBA KEYS index (0-9) to RetroArch / Libretro RetroPad buttons:
+    // 0: KEYS.A      -> 8 (A)
+    // 1: KEYS.B      -> 0 (B)
+    // 2: KEYS.SELECT -> 2 (SELECT)
+    // 3: KEYS.START  -> 3 (START)
+    // 4: KEYS.RIGHT  -> 7 (RIGHT)
+    // 5: KEYS.LEFT   -> 6 (LEFT)
+    // 6: KEYS.UP     -> 4 (UP)
+    // 7: KEYS.DOWN   -> 5 (DOWN)
+    // 8: KEYS.R      -> 11 (R)
+    // 9: KEYS.L      -> 10 (L)
+    const GBA_TO_EJS = [8, 0, 2, 3, 7, 6, 4, 5, 11, 10];
+    return GBA_TO_EJS[key] ?? -1;
   }
 
   // ===== SPEED / FAST FORWARD =====
