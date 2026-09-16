@@ -16,9 +16,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const hamburgerDropdown = document.getElementById('hamburger-dropdown');
 
   // Initialize GBA Subsystems
-  // Default: Optimized JS engine (stable, full features including Memory Scanner)
-  // Optional: EmulatorJS WASM core (faster but experimental, set via Settings)
-  const enginePref = localStorage.getItem('gba_k_engine') || 'js';
+  // Default: EmulatorJS WASM core (mGBA, fast 60FPS, local files + CDN core cache)
+  // Alternative: JS engine (full Memory Scanner, set via Settings)
+  const enginePref = localStorage.getItem('gba_k_engine') || 'wasm';
   const gba = enginePref === 'wasm' ? new EmulatorAdapter(canvas) : new GBA(canvas);
   const controls = new GBAControls(gba);
   const shaders = new GBAShaders(canvasWrapper);
@@ -564,7 +564,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const engineSelect = document.getElementById('setting-engine');
   if (engineSelect) {
-    engineSelect.value = localStorage.getItem('gba_k_engine') || 'js';
+    engineSelect.value = localStorage.getItem('gba_k_engine') || 'wasm';
     engineSelect.addEventListener('change', (e) => {
       const chosen = e.target.value;
       localStorage.setItem('gba_k_engine', chosen);
