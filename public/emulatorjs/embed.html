@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>GBA_K Core</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+    #game {
+      width: 100%;
+      height: 100%;
+    }
+    /* Hide all default EmulatorJS UI */
+    .ejs_parent .ejs_bar,
+    .ejs_parent .ejs_bottom_bar,
+    .ejs_parent .ejs_bottom_bar_area,
+    .ejs_parent .ejs_context_menu,
+    .ejs_parent .ejs_virtualGamepad_container,
+    .ejs_parent .ejs_menu_bar,
+    .ejs_parent .ejs_menu_bar_hidden,
+    .ejs_parent .ejs_cheat_menu,
+    .ejs_parent .ejs_control_bar,
+    .ejs_parent [class*="ejs_menu"],
+    .ejs_parent [class*="ejs_popup"],
+    .ejs_parent .ejs_loading_text,
+    .ejs_start_button {
+      display: none !important;
+      pointer-events: none !important;
+    }
+    canvas {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: contain;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+  </style>
+</head>
+<body>
+  <div id="game"></div>
+  <script>
+    // Receive game configuration from parent
+    window.addEventListener('message', function(event) {
+      if (!event.data || event.data.type !== 'EJS_INIT_GAME') return;
+
+      const config = event.data;
+      window.EJS_player = '#game';
+      window.EJS_core = 'gba';
+      window.EJS_gameUrl = config.gameUrl;
+      window.EJS_gameName = config.gameName || 'GBA_K_Game';
+      window.EJS_color = '#000000';
+      window.EJS_backgroundColor = '#000000';
+      window.EJS_startOnLoaded = true;
+      window.EJS_threads = false;
+      window.EJS_pathtodata = '/emulatorjs/';
+      window.EJS_DEBUG_XX = false;
+      window.EJS_noAutoFocus = true;
+
+      window.EJS_Buttons = {
+        playPause: false, restart: false, mute: false, settings: false,
+        fullscreen: false, saveState: false, loadState: false,
+        screenRecord: false, gamepad: false, cheat: false, volume: false,
+        saveSavFiles: false, loadSavFiles: false, quickSave: false, quickLoad: false,
+        screenshot: false, cacheManager: false
+      };
+      window.EJS_VirtualGamepadSettings = { type: 'none' };
+
+      window.EJS_onGameStart = function() {
+        window.parent.postMessage({ type: 'EJS_GAME_STARTED' }, '*');
+      };
+
+      // Auto-unlock audio helper
+      function tryUnlockAudio() {
+        try {
+          if (window.EJS_emulator?.Module?.AL) {
+            const al = window.EJS_emulator.Module.AL;
+            if (al.currentCtx?.audioCtx && al.currentCtx.audioCtx.state === 'suspended') {
+              al.currentCtx.audioCtx.resume().catch(() => {});
+            }
+          }
+        } catch (e) {}
+      }
+
+      window.addEventListener('click', tryUnlockAudio);
+      window.addEventListener('touchstart', tryUnlockAudio, { passive: true });
+      window.addEventListener('message', function(e) {
+        if (e.data && e.data.type === 'EJS_RESUME_AUDIO') {
+          tryUnlockAudio();
+        }
+      });
+
+      // Load loader script
+      const script = document.createElement('script');
+      script.src = '/emulatorjs/loader.js';
+      document.body.appendChild(script);
+    });
+
+    // Notify parent that iframe is ready
+    window.parent.postMessage({ type: 'EJS_IFRAME_READY' }, '*');
+  </script>
+</body>
+</html>

@@ -20,6 +20,8 @@ window.addEventListener('DOMContentLoaded', () => {
   // Alternative: JS engine (full Memory Scanner, set via Settings)
   const enginePref = localStorage.getItem('gba_k_engine') || 'wasm';
   const gba = enginePref === 'wasm' ? new EmulatorAdapter(canvas) : new GBA(canvas);
+  window.gba = gba;
+  window.gba_instance = gba;
   const controls = new GBAControls(gba);
   const shaders = new GBAShaders(canvasWrapper);
   const scanner = new GBAMemoryScanner(gba);
@@ -576,11 +578,12 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Audio Unlock on First Touch / Click (Web Audio mobile policy)
   const unlockAudio = () => {
+    if (gba._resumeAudio) {
+      gba._resumeAudio();
+    }
     if (gba.core && gba.core.audio && gba.core.audio.context && gba.core.audio.context.state === 'suspended') {
       gba.core.audio.context.resume().catch(() => {});
     }
-    window.removeEventListener('touchstart', unlockAudio);
-    window.removeEventListener('click', unlockAudio);
   };
   window.addEventListener('touchstart', unlockAudio, { passive: true });
   window.addEventListener('click', unlockAudio, { passive: true });
@@ -603,15 +606,15 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Auto load demo on first start if no ROM loaded
+  // Auto load last played ROM if available
   setTimeout(async () => {
     const roms = await library.getAllRoms();
-    if (roms.length > 0) {
-      handleLoadRom(roms[0].data, roms[0].name);
+    // Filter out any old dummy demo files
+    const realRoms = roms.filter(r => r.name !== 'Neon_Blast_Demo.gba' && r.size > 1024);
+    if (realRoms.length > 0) {
+      handleLoadRom(realRoms[0].data, realRoms[0].name);
     } else {
-      const demoBuffer = library.createSampleGbaRom('NEON BLAST GBA');
-      library.saveRomToDb('Neon_Blast_Demo.gba', demoBuffer);
-      handleLoadRom(demoBuffer, 'Neon_Blast_Demo.gba');
+      romBadge.textContent = 'Nhấn 📂 để mở ROM GBA';
     }
   }, 150);
 });
