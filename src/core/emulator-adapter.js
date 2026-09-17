@@ -105,9 +105,7 @@ export class EmulatorAdapter {
         this._loadCheatsFromStorage();
         this.loadFreezeList();
 
-        if (this._fastForward) {
-          this._applySpeed();
-        }
+        this._applySpeed();
       }
     });
   }
@@ -309,6 +307,17 @@ export class EmulatorAdapter {
         const toggleFF = gm.toggleFastForward || gm.functions?.toggleFastForward;
         if (toggleFF) {
           toggleFF.call(gm, isFF ? 1 : 0);
+        }
+
+        const setVSync = gm.setVSync || gm.functions?.setVSync;
+        if (setVSync) {
+          setVSync.call(gm, isFF ? 0 : 1);
+        }
+
+        const setVar = gm.setVariable || gm.functions?.setVariable;
+        if (setVar) {
+          setVar.call(gm, 'mgba_frameskip', isFF ? 'auto' : 'disabled');
+          setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
         }
       }
     } catch (e) {}

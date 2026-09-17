@@ -227,11 +227,15 @@ export class GBA {
   }
 
   runFrame() {
-    // Apply Cheats every frame
-    this.cheats.applyCheats();
+    // Apply Cheats every frame (only if there are enabled cheats)
+    if (this.cheats && this.cheats.cheats && this.cheats.cheats.length > 0) {
+      this.cheats.applyCheats();
+    }
 
-    // Apply Freeze list every frame
-    this.applyFreezes();
+    // Apply Freeze list every frame (only if active)
+    if (this.freezeList && this.freezeList.length > 0) {
+      this.applyFreezes();
+    }
 
     // Advance 1 full frame with audio & video rendering
     this.core.advanceFrame();

@@ -1533,6 +1533,20 @@ GameBoyAdvanceSoftwareRenderer.prototype.drawScanline = function(y) {
 		this.drawScanlineBlank(backing);
 		return;
 	}
+
+	// FAST PATH: When skipping frame rendering during fast-forward,
+	// only advance affine background coordinates (dmx/dmy) and return immediately!
+	if (this.video && this.video.skipDraw) {
+		for (var i = 0; i < this.drawLayers.length; ++i) {
+			var layer = this.drawLayers[i];
+			if (layer.bg) {
+				layer.sx += layer.dmx;
+				layer.sy += layer.dmy;
+			}
+		}
+		return;
+	}
+
 	this.prepareScanline(backing);
 	this.vcount = y;
 

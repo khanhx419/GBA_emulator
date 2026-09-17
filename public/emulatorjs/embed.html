@@ -139,32 +139,6 @@
         // Ensure RetroArch config disables font / OSD notifications and enables frameskip + audio mute during fast-forward
         try {
           const gm = window.EJS_emulator?.gameManager;
-          if (gm?.FS) {
-            const cfgPath = '/home/web_user/.config/retroarch/retroarch.cfg';
-            if (gm.FS.analyzePath(cfgPath).exists) {
-              let cfg = new TextDecoder().decode(gm.FS.readFile(cfgPath));
-              let modified = false;
-              if (!cfg.includes('video_font_enable')) {
-                cfg += '\nvideo_font_enable = false\nnotification_show_fast_forward = false\nvideo_message_pos_x = 2.0\nvideo_message_pos_y = 2.0\n';
-                modified = true;
-              }
-              if (!cfg.includes('fastforward_frameskip')) {
-                cfg += '\nfastforward_frameskip = true\n';
-                modified = true;
-              }
-              if (!cfg.includes('audio_fastforward_mute')) {
-                cfg += '\naudio_fastforward_mute = true\n';
-                modified = true;
-              }
-              if (!cfg.includes('audio_sync = false')) {
-                cfg += '\naudio_sync = false\naudio_rate_control = false\nvideo_vsync = false\n';
-                modified = true;
-              }
-              if (modified) {
-                gm.FS.writeFile(cfgPath, cfg);
-              }
-            }
-          }
           // Enable mGBA core frameskip & idle optimization directly via runtime Cwrap
           if (gm) {
             const setVar = gm.setVariable || gm.functions?.setVariable;
@@ -174,6 +148,9 @@
               setVar.call(gm, 'mgba_interframe_blending', 'disabled');
               setVar.call(gm, 'mgba_color_correction', 'disabled');
             }
+          }
+          if (pendingSpeed) {
+            applySpeed(pendingSpeed.fastForward, pendingSpeed.speedMultiplier);
           }
         } catch (e) {}
         document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="virtualGamepad"], .ejs_message, [class*="ejs_message"]').forEach(el => el.remove());
@@ -194,6 +171,8 @@
 
       window.addEventListener('click', tryUnlockAudio);
       window.addEventListener('touchstart', tryUnlockAudio, { passive: true });
+
+      let pendingSpeed = null;
 
       function applySpeed(fastForward, speedMultiplier) {
         const ratio = Math.max(1, parseFloat(speedMultiplier) || 2.0);
@@ -220,6 +199,14 @@
               toggleFF.call(gm, fastForward ? 1 : 0);
             }
 
+            // CRITICAL: Unbind VSync / rAF when fast-forwarding so Emscripten main loop
+            // switches from rAF (60Hz display lock) to setImmediate (mode 2).
+            // When returning to 1x normal speed, re-enable VSync (mode 1 / rAF).
+            const setVSync = gm.setVSync || gm.functions?.setVSync;
+            if (setVSync) {
+              setVSync.call(gm, fastForward ? 0 : 1);
+            }
+
             const setVar = gm.setVariable || gm.functions?.setVariable;
             if (setVar) {
               setVar.call(gm, 'mgba_frameskip', fastForward ? 'auto' : 'disabled');
@@ -234,6 +221,7 @@
         if (e.data.type === 'EJS_RESUME_AUDIO') {
           tryUnlockAudio();
         } else if (e.data.type === 'EJS_SET_SPEED') {
+          pendingSpeed = { fastForward: e.data.fastForward, speedMultiplier: e.data.speedMultiplier };
           applySpeed(e.data.fastForward, e.data.speedMultiplier);
         }
       });

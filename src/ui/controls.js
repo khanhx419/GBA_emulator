@@ -428,14 +428,14 @@ export class GBAControls {
         dy = (dy / dist) * maxRadius;
       }
 
-      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+      knob.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
       updateDirection(dx, dy);
     };
 
     const endStick = () => {
       activeTouchId = null;
       isMouseDown = false;
-      knob.style.transform = 'translate(0px, 0px)';
+      knob.style.transform = 'translate3d(0px, 0px, 0)';
       this.gba.setKeyUp(KEYS.UP);
       this.gba.setKeyUp(KEYS.DOWN);
       this.gba.setKeyUp(KEYS.LEFT);

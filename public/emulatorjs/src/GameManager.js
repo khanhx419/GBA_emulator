@@ -389,7 +389,7 @@ class EJS_GameManager {
         })
     }
     setVSync(enabled) {
-        this.functions.setVSync(enabled);
+        this.functions.setVSync(enabled ? 1 : 0);
     }
     toggleMainLoop(playing) {
         this.functions.toggleMainLoop(playing);
