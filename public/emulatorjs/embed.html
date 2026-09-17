@@ -37,6 +37,10 @@
     .ejs_parent [class*="ejs_menu"],
     .ejs_parent [class*="ejs_popup"],
     .ejs_parent .ejs_loading_text,
+    .ejs_parent .ejs_message,
+    .ejs_parent [class*="ejs_message"],
+    .ejs_message,
+    [class*="ejs_message"],
     .ejs_start_button {
       display: none !important;
       visibility: hidden !important;
@@ -58,9 +62,9 @@
 <body>
   <div id="game"></div>
   <script>
-    // Proactively remove any virtual gamepad elements injected by EmulatorJS
+    // Proactively remove any virtual gamepad & message elements injected by EmulatorJS
     const cleanupObserver = new MutationObserver(() => {
-      document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="virtualGamepad"], [class*="ejs_virtualGamepad"], [class*="ejs_menu_bar"]').forEach(el => el.remove());
+      document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="virtualGamepad"], [class*="ejs_virtualGamepad"], [class*="ejs_menu_bar"], .ejs_message, [class*="ejs_message"]').forEach(el => el.remove());
     });
     cleanupObserver.observe(document.body, { childList: true, subtree: true });
 
@@ -97,6 +101,7 @@
 
       window.EJS_onGameStart = function() {
         if (window.EJS_emulator) {
+          window.EJS_emulator.displayMessage = function() {}; // Silence all on-screen DOM popups
           if (window.EJS_emulator.virtualGamepad) {
             try { window.EJS_emulator.virtualGamepad.remove(); } catch (e) {}
           }
@@ -104,7 +109,21 @@
             window.EJS_emulator.toggleVirtualGamepad(false);
           }
         }
-        document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="virtualGamepad"]').forEach(el => el.remove());
+        // Ensure RetroArch config disables font / OSD notifications
+        try {
+          const gm = window.EJS_emulator?.gameManager;
+          if (gm?.FS) {
+            const cfgPath = '/home/web_user/.config/retroarch/retroarch.cfg';
+            if (gm.FS.analyzePath(cfgPath).exists) {
+              let cfg = new TextDecoder().decode(gm.FS.readFile(cfgPath));
+              if (!cfg.includes('video_font_enable')) {
+                cfg += '\nvideo_font_enable = false\nnotification_show_fast_forward = false\nvideo_message_pos_x = 2.0\nvideo_message_pos_y = 2.0\n';
+                gm.FS.writeFile(cfgPath, cfg);
+              }
+            }
+          }
+        } catch (e) {}
+        document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="virtualGamepad"], .ejs_message, [class*="ejs_message"]').forEach(el => el.remove());
         window.parent.postMessage({ type: 'EJS_GAME_STARTED' }, '*');
       };
 

@@ -145,6 +145,10 @@ class EJS_GameManager {
             "video_top_portrait_viewport = true\n" +
             "video_vsync = true\n" +
             "video_smooth = false\n" +
+            "video_font_enable = false\n" +
+            "notification_show_fast_forward = false\n" +
+            "video_message_pos_x = 2.0\n" +
+            "video_message_pos_y = 2.0\n" +
             "fastforward_ratio = 3.0\n" +
             "slowmotion_ratio = 3.0\n" +
             (this.EJS.rewindEnabled ? "rewind_enable = true\n" : "") +
