@@ -8,6 +8,8 @@
  * - Full parity for Input, Fast-Forward, Save/Load States, and Cheats
  */
 
+import { saveStateManager } from './save-state-manager.js';
+
 export class EmulatorAdapter {
   constructor(canvas) {
     this.canvas = canvas;
@@ -295,7 +297,7 @@ export class EmulatorAdapter {
 
   // ===== SAVE / LOAD STATE =====
 
-  saveState(slot = 1) {
+  async saveState(slot = 1) {
     const gm = this._gameManager;
     if (!this.romLoaded || !gm) return null;
 
@@ -304,7 +306,7 @@ export class EmulatorAdapter {
       if (typeof gm.getState === 'function') {
         const u8 = gm.getState();
         if (u8 && u8.length > 0) {
-          stateData = Array.from(u8);
+          stateData = u8;
         }
       } else if (gm.functions && typeof gm.functions.saveStateInfo === 'function') {
         const parts = gm.functions.saveStateInfo().split('|');
@@ -312,7 +314,7 @@ export class EmulatorAdapter {
           const size = parseInt(parts[0], 10);
           const start = parseInt(parts[1], 10);
           const arr = gm.Module.HEAPU8.subarray(start, start + size);
-          stateData = Array.from(arr);
+          stateData = new Uint8Array(arr);
         }
       }
 
@@ -327,38 +329,25 @@ export class EmulatorAdapter {
         if (ejsCanvas) screenshot = ejsCanvas.toDataURL('image/jpeg', 0.8);
       } catch (e) {}
 
-      const stateObj = {
-        version: 2,
-        engine: 'emulatorjs',
-        romTitle: this.romTitle,
-        timestamp: Date.now(),
-        state: stateData,
-        screenshot
-      };
-
-      localStorage.setItem(`myboy_savestate_${this.romTitle}_slot${slot}`, JSON.stringify(stateObj));
-      return stateObj;
+      return await saveStateManager.saveState(this.romTitle, slot, stateData, screenshot);
     } catch (e) {
       console.warn('[GBA_K] Save state error:', e);
       return null;
     }
   }
 
-  loadState(slot = 1) {
+  async loadState(slot = 1) {
     const gm = this._gameManager;
     if (!this.romLoaded || !gm) return false;
 
     try {
-      const json = localStorage.getItem(`myboy_savestate_${this.romTitle}_slot${slot}`);
-      if (!json) return false;
-      const stateObj = JSON.parse(json);
+      const loaded = await saveStateManager.loadState(this.romTitle, slot);
+      if (!loaded || !loaded.state) return false;
 
-      if (stateObj.state && stateObj.state.length > 0) {
-        const u8 = new Uint8Array(stateObj.state);
-        if (typeof gm.loadState === 'function') {
-          gm.loadState(u8);
-          return true;
-        }
+      const u8 = loaded.state instanceof Uint8Array ? loaded.state : new Uint8Array(loaded.state);
+      if (typeof gm.loadState === 'function') {
+        gm.loadState(u8);
+        return true;
       }
       return false;
     } catch (e) {
@@ -368,14 +357,103 @@ export class EmulatorAdapter {
   }
 
   getStateInfo(slot = 1) {
+    return saveStateManager.getStateInfo(this.romTitle, slot);
+  }
+
+  // ===== MEMORY ACCESS FOR SCANNER =====
+
+  getMemorySnapshot() {
+    const gm = this._gameManager;
+    if (!this.romLoaded || !gm) return null;
     try {
-      const json = localStorage.getItem(`myboy_savestate_${this.romTitle}_slot${slot}`);
-      if (!json) return null;
-      const data = JSON.parse(json);
-      return { timestamp: data.timestamp, screenshot: data.screenshot };
+      let state = null;
+      if (typeof gm.getState === 'function') {
+        state = gm.getState();
+      } else if (gm.functions && typeof gm.functions.saveStateInfo === 'function') {
+        const parts = gm.functions.saveStateInfo().split('|');
+        if (parts[2] === '1') {
+          const size = parseInt(parts[0], 10);
+          const start = parseInt(parts[1], 10);
+          const arr = gm.Module.HEAPU8.subarray(start, start + size);
+          state = new Uint8Array(arr);
+        }
+      }
+
+      if (state && state.length >= 0x61000) {
+        // EWRAM starts at 0x21000, length 0x40000 (256KB)
+        // IWRAM starts at 0x19000, length 0x8000 (32KB)
+        return {
+          ewram: state.subarray(0x21000, 0x21000 + 0x40000),
+          iwram: state.subarray(0x19000, 0x19000 + 0x8000),
+          fullState: state
+        };
+      }
     } catch (e) {
-      return null;
+      console.warn('[EmulatorAdapter] getMemorySnapshot error:', e);
     }
+    return null;
+  }
+
+  readMemory(addr, type = 'u16', cachedSnapshot = null) {
+    const snap = cachedSnapshot || this.getMemorySnapshot();
+    if (!snap) return 0;
+
+    let buf = null;
+    let offset = 0;
+    if (addr >= 0x02000000 && addr < 0x02040000) {
+      buf = snap.ewram;
+      offset = addr - 0x02000000;
+    } else if (addr >= 0x03000000 && addr < 0x03008000) {
+      buf = snap.iwram;
+      offset = addr - 0x03000000;
+    }
+    if (!buf || offset < 0 || offset >= buf.length) return 0;
+
+    if (type === 'u8') {
+      return buf[offset];
+    } else if (type === 'u16') {
+      return buf[offset] | (buf[offset + 1] << 8);
+    } else if (type === 'u32') {
+      return (buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24)) >>> 0;
+    }
+    return 0;
+  }
+
+  writeMemory(addr, val, type = 'u16') {
+    const gm = this._gameManager;
+    if (!this.romLoaded || !gm) return false;
+    try {
+      const snap = this.getMemorySnapshot();
+      if (!snap) return false;
+      const state = snap.fullState;
+
+      let targetOffset = -1;
+      if (addr >= 0x02000000 && addr < 0x02040000) {
+        targetOffset = 0x21000 + (addr - 0x02000000);
+      } else if (addr >= 0x03000000 && addr < 0x03008000) {
+        targetOffset = 0x19000 + (addr - 0x03000000);
+      }
+
+      if (targetOffset !== -1) {
+        val = Number(val);
+        if (type === 'u8') {
+          state[targetOffset] = val & 0xFF;
+        } else if (type === 'u16') {
+          state[targetOffset] = val & 0xFF;
+          state[targetOffset + 1] = (val >> 8) & 0xFF;
+        } else if (type === 'u32') {
+          state[targetOffset] = val & 0xFF;
+          state[targetOffset + 1] = (val >> 8) & 0xFF;
+          state[targetOffset + 2] = (val >> 16) & 0xFF;
+          state[targetOffset + 3] = (val >>> 24) & 0xFF;
+        }
+        gm.loadState(state);
+        return true;
+      }
+    } catch (e) {
+      console.warn('[EmulatorAdapter] writeMemory error:', e);
+    }
+    return false;
   }
 
   // ===== CHEATS =====
@@ -415,6 +493,7 @@ export class EmulatorAdapter {
     if (gm.resetCheat) gm.resetCheat();
 
     let idx = 0;
+    // 1. Regular Cheats
     for (const cheat of this._cheats) {
       if (!cheat.enabled) continue;
       const lines = cheat.code.trim().split(/[\n\r]+/);
@@ -426,6 +505,31 @@ export class EmulatorAdapter {
         }
       }
     }
+
+    // 2. Active Freezes as hardware cheats
+    for (const f of this.freezeList) {
+      const code = this._formatFreezeAsCheat(f.address, f.value, f.dataType);
+      if (code) {
+        gm.setCheat(idx, 1, code);
+        idx++;
+      }
+    }
+  }
+
+  _formatFreezeAsCheat(addr, val, type = 'u16') {
+    val = Number(val);
+    if (addr >= 0x02000000 && addr < 0x02040000) {
+      const offset = (addr - 0x02000000).toString(16).padStart(6, '0').toUpperCase();
+      if (type === 'u8') return `3200${offset.slice(2)} 00${(val & 0xFF).toString(16).padStart(2, '0').toUpperCase()}`;
+      if (type === 'u32') return `0400${offset.slice(2)} ${(val >>> 0).toString(16).padStart(8, '0').toUpperCase()}`;
+      return `8200${offset.slice(2)} ${(val & 0xFFFF).toString(16).padStart(4, '0').toUpperCase()}`;
+    } else if (addr >= 0x03000000 && addr < 0x03008000) {
+      const offset = (addr - 0x03000000).toString(16).padStart(6, '0').toUpperCase();
+      if (type === 'u8') return `3300${offset.slice(2)} 00${(val & 0xFF).toString(16).padStart(2, '0').toUpperCase()}`;
+      if (type === 'u32') return `0400${offset.slice(2)} ${(val >>> 0).toString(16).padStart(8, '0').toUpperCase()}`;
+      return `8300${offset.slice(2)} ${(val & 0xFFFF).toString(16).padStart(4, '0').toUpperCase()}`;
+    }
+    return null;
   }
 
   _saveCheatsToStorage() {
@@ -518,27 +622,36 @@ export class EmulatorAdapter {
     }
   }
 
-  // ===== FREEZE LIST (limited in WASM mode) =====
+  // ===== FREEZE LIST =====
 
-  applyFreezes() {}
+  applyFreezes() {
+    this._applyCheatsToEJS();
+  }
+
   addFreeze(address, value, dataType) {
     this.freezeList = this.freezeList.filter(f => f.address !== address);
     this.freezeList.push({ address, value, dataType });
     this.saveFreezeList();
+    this._applyCheatsToEJS();
   }
+
   removeFreeze(address) {
     this.freezeList = this.freezeList.filter(f => f.address !== address);
     this.saveFreezeList();
+    this._applyCheatsToEJS();
   }
+
   saveFreezeList() {
     try {
       localStorage.setItem('myboy_freezes_' + (this.romTitle || 'default'), JSON.stringify(this.freezeList));
     } catch (e) {}
   }
+
   loadFreezeList() {
     try {
       const data = localStorage.getItem('myboy_freezes_' + (this.romTitle || 'default'));
       this.freezeList = data ? JSON.parse(data) : [];
+      this._applyCheatsToEJS();
     } catch (e) {
       this.freezeList = [];
     }
@@ -547,13 +660,24 @@ export class EmulatorAdapter {
   // ===== MMU & CORE SHIMS =====
 
   get mmu() {
+    const self = this;
     return {
       get rom() { return new Uint8Array(0); },
       get romSize() { return 0; },
-      get ewram() { return new Uint8Array(0x40000); },
-      get iwram() { return new Uint8Array(0x8000); },
-      read8() { return 0; }, read16() { return 0; }, read32() { return 0; },
-      write8() {}, write16() {}, write32() {},
+      get ewram() {
+        const snap = self.getMemorySnapshot();
+        return snap ? snap.ewram : new Uint8Array(0x40000);
+      },
+      get iwram() {
+        const snap = self.getMemorySnapshot();
+        return snap ? snap.iwram : new Uint8Array(0x8000);
+      },
+      read8(addr) { return self.readMemory(addr, 'u8'); },
+      read16(addr) { return self.readMemory(addr, 'u16'); },
+      read32(addr) { return self.readMemory(addr, 'u32'); },
+      write8(addr, val) { return self.writeMemory(addr, val, 'u8'); },
+      write16(addr, val) { return self.writeMemory(addr, val, 'u16'); },
+      write32(addr, val) { return self.writeMemory(addr, val, 'u32'); },
       get saveData() { return new Uint8Array(0); }
     };
   }

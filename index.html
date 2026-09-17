@@ -267,8 +267,19 @@
               </select>
             </div>
 
+            <div class="scanner-input-row" style="margin-top: 4px;">
+              <label>So sánh:</label>
+              <div class="scanner-compare-group" id="scanner-compare-group">
+                <button type="button" class="btn-compare-mode active" data-mode="exact" title="Bằng giá trị nhập (Exact)">= Bằng</button>
+                <button type="button" class="btn-compare-mode" data-mode="greater" title="Lớn hơn / Tăng lên (Greater)">&gt; Tăng</button>
+                <button type="button" class="btn-compare-mode" data-mode="less" title="Nhỏ hơn / Giảm đi (Less)">&lt; Giảm</button>
+                <button type="button" class="btn-compare-mode" data-mode="unchanged" title="Không đổi so với lần trước">== Giữ</button>
+                <button type="button" class="btn-compare-mode" data-mode="changed" title="Đã thay đổi so với lần trước">!= Khác</button>
+              </div>
+            </div>
+
             <div class="scanner-search-row">
-              <input type="number" id="scanner-value-input" placeholder="Nhập giá trị cần tìm (vd: HP, Tiền)" class="scanner-input" />
+              <input type="number" id="scanner-value-input" placeholder="Nhập giá trị cần tìm (vd: HP, Tiền, Level)" class="scanner-input" />
               <div class="scanner-btn-group">
                 <button class="btn-play-rom" id="btn-scanner-first">Tìm Mới</button>
                 <button class="tool-btn" id="btn-scanner-next" disabled>Lọc Tiếp</button>
@@ -281,7 +292,17 @@
             </div>
           </div>
 
-          <h4 style="font-size: 0.9rem; color: var(--text-dim); margin-top: 10px;">KẾT QUẢ TÌM THẤY (<span id="scanner-result-count">0</span>):</h4>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+            <h4 style="font-size: 0.9rem; color: var(--text-dim); margin: 0;">KẾT QUẢ TÌM THẤY (<span id="scanner-result-count">0</span>):</h4>
+          </div>
+
+          <div class="scanner-batch-toolbar" id="scanner-batch-toolbar" style="display: none;">
+            <button class="btn-batch-action" id="btn-batch-edit" title="Sửa tất cả kết quả về một giá trị mới">✏️ Sửa tất cả</button>
+            <button class="btn-batch-action" id="btn-batch-freeze" title="Khóa tất cả các địa chỉ tìm thấy">❄️ Khóa tất cả</button>
+            <button class="btn-batch-action" id="btn-batch-cheat" title="Tạo mã GameShark/CodeBreaker vào danh sách Cheat">📋 Tạo Cheat</button>
+            <button class="btn-batch-action btn-danger" id="btn-batch-clear" title="Xóa toàn bộ kết quả tìm kiếm">🗑️ Xóa</button>
+          </div>
+
           <div class="scanner-results-container" id="scanner-results-list">
             <!-- Rendered by JS -->
             <div style="text-align: center; color: var(--text-dim); padding: 16px;">Chưa có kết quả tìm kiếm nào</div>

@@ -1,5 +1,6 @@
 import GameBoyAdvance from './engine/gba.js';
 import { GBACheats } from './cheats.js';
+import { saveStateManager } from './save-state-manager.js';
 
 export class GBA {
   constructor(canvas) {
@@ -294,36 +295,28 @@ export class GBA {
   }
 
   // Save State / Load State
-  saveState(slot = 1) {
+  async saveState(slot = 1) {
     if (!this.romLoaded) return null;
 
     try {
-      const stateObj = {
-        version: 1,
-        romTitle: this.romTitle,
-        timestamp: Date.now(),
-        savedata: this.core.mmu.save ? Array.from(new Uint8Array(this.core.mmu.save.buffer)) : [],
-        screenshot: this.canvas ? this.canvas.toDataURL('image/jpeg', 0.8) : null
-      };
-
-      localStorage.setItem(`myboy_savestate_${this.romTitle}_slot${slot}`, JSON.stringify(stateObj));
-      return stateObj;
+      const stateData = this.core.mmu.save ? new Uint8Array(this.core.mmu.save.buffer) : new Uint8Array(0);
+      const screenshot = this.canvas ? this.canvas.toDataURL('image/jpeg', 0.8) : null;
+      return await saveStateManager.saveState(this.romTitle, slot, stateData, screenshot);
     } catch (e) {
       console.warn('Error saving state:', e);
       return null;
     }
   }
 
-  loadState(slot = 1) {
+  async loadState(slot = 1) {
     if (!this.romLoaded) return false;
 
     try {
-      const json = localStorage.getItem(`myboy_savestate_${this.romTitle}_slot${slot}`);
-      if (!json) return false;
+      const loaded = await saveStateManager.loadState(this.romTitle, slot);
+      if (!loaded || !loaded.state) return false;
 
-      const stateObj = JSON.parse(json);
-      if (stateObj.savedata && this.core.mmu.save) {
-        const u8 = new Uint8Array(stateObj.savedata);
+      if (this.core.mmu.save) {
+        const u8 = loaded.state;
         const target = new Uint8Array(this.core.mmu.save.buffer);
         target.set(u8.subarray(0, target.length));
       }
@@ -335,17 +328,7 @@ export class GBA {
   }
 
   getStateInfo(slot = 1) {
-    try {
-      const json = localStorage.getItem(`myboy_savestate_${this.romTitle}_slot${slot}`);
-      if (!json) return null;
-      const data = JSON.parse(json);
-      return {
-        timestamp: data.timestamp,
-        screenshot: data.screenshot
-      };
-    } catch (e) {
-      return null;
-    }
+    return saveStateManager.getStateInfo(this.romTitle, slot);
   }
 
   // Export Battery Save (.sav)

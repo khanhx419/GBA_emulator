@@ -1072,6 +1072,73 @@ html, body {
   color: #000;
 }
 
+/* Scanner Comparison Mode Buttons */
+.scanner-compare-group {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.btn-compare-mode {
+  background: #1e2235;
+  border: 1px solid var(--glass-border);
+  color: var(--text-dim);
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-compare-mode:hover {
+  border-color: var(--accent-cyan);
+  color: #fff;
+}
+
+.btn-compare-mode.active {
+  background: var(--accent-cyan);
+  color: #000;
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(0, 242, 254, 0.35);
+}
+
+/* Scanner Batch Actions Toolbar */
+.scanner-batch-toolbar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.btn-batch-action {
+  flex: 1;
+  min-width: 75px;
+  padding: 6px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.btn-batch-action:hover {
+  background: rgba(0, 242, 254, 0.15);
+  border-color: var(--accent-cyan);
+}
+
+.btn-batch-action.btn-danger:hover {
+  background: rgba(255, 68, 68, 0.25);
+  border-color: #ff4444;
+}
+
 /* Key Bindings Styling */
 .keybind-grid {
   display: grid;

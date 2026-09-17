@@ -196,34 +196,55 @@ window.addEventListener('DOMContentLoaded', () => {
     grid.innerHTML = html;
 
     grid.querySelectorAll('.btn-slot-save').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const slot = parseInt(btn.getAttribute('data-slot'), 10);
         if (!gba.romLoaded) {
           showAppToast('⚠️ Vui lòng mở game trước khi Lưu State!');
           return;
         }
-        const res = gba.saveState(slot);
-        if (res) {
-          showAppToast(`💾 Đã lưu thành công vào Slot ${slot}!`);
-        } else {
-          showAppToast(`❌ Lưu State Slot ${slot} thất bại!`);
+        btn.disabled = true;
+        const prevText = btn.textContent;
+        btn.textContent = '...';
+        try {
+          const res = await gba.saveState(slot);
+          if (res) {
+            showAppToast(`💾 Đã lưu thành công vào Slot ${slot}!`);
+          } else {
+            showAppToast(`❌ Lưu State Slot ${slot} thất bại!`);
+          }
+        } catch (e) {
+          showAppToast(`❌ Lưu State Slot ${slot} lỗi: ${e.message}`);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = prevText;
+          renderSaveSlots();
         }
-        renderSaveSlots();
       });
     });
 
     grid.querySelectorAll('.btn-slot-load').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const slot = parseInt(btn.getAttribute('data-slot'), 10);
         if (!gba.romLoaded) {
           showAppToast('⚠️ Vui lòng mở game trước khi Tải State!');
           return;
         }
-        if (gba.loadState(slot)) {
-          showAppToast(`⚡ Đã tải State Slot ${slot}!`);
-          closeAllModals();
-        } else {
-          showAppToast(`❌ Tải State Slot ${slot} thất bại!`);
+        btn.disabled = true;
+        const prevText = btn.textContent;
+        btn.textContent = '...';
+        try {
+          const ok = await gba.loadState(slot);
+          if (ok) {
+            showAppToast(`⚡ Đã tải State Slot ${slot}!`);
+            closeAllModals();
+          } else {
+            showAppToast(`❌ Tải State Slot ${slot} thất bại!`);
+          }
+        } catch (e) {
+          showAppToast(`❌ Tải State Slot ${slot} lỗi: ${e.message}`);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = prevText;
         }
       });
     });
@@ -308,27 +329,54 @@ window.addEventListener('DOMContentLoaded', () => {
   const scannerCount = document.getElementById('scanner-result-count');
   const scannerResultsList = document.getElementById('scanner-results-list');
   const scannerFrozenList = document.getElementById('scanner-frozen-list');
+  const scannerBatchToolbar = document.getElementById('scanner-batch-toolbar');
+
+  // Compare mode buttons
+  const compareButtons = document.querySelectorAll('.btn-compare-mode');
+  compareButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      compareButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const mode = btn.getAttribute('data-mode');
+      scanner.setCompareType(mode);
+      if (mode === 'unchanged') {
+        scannerStatus.textContent = 'Chế độ so sánh: "Không đổi" (bằng giá trị lần trước). Bấm Lọc Tiếp.';
+      } else if (mode === 'changed') {
+        scannerStatus.textContent = 'Chế độ so sánh: "Đã thay đổi" (khác giá trị lần trước). Bấm Lọc Tiếp.';
+      } else if (mode === 'greater') {
+        scannerStatus.textContent = 'Chế độ so sánh: "Tăng lên" (>). Nhập số hoặc để trống để so với lần trước.';
+      } else if (mode === 'less') {
+        scannerStatus.textContent = 'Chế độ so sánh: "Giảm đi" (<). Nhập số hoặc để trống để so với lần trước.';
+      } else {
+        scannerStatus.textContent = 'Chế độ so sánh: "Bằng chính xác" (=). Nhập giá trị rồi bấm Tìm Mới / Lọc Tiếp.';
+      }
+    });
+  });
 
   const updateScannerUI = () => {
     scannerCount.textContent = scanner.results.length;
     if (scanner.results.length === 0) {
       scannerResultsList.innerHTML = `<div style="text-align: center; color: var(--text-dim); padding: 16px;">Chưa có kết quả tìm kiếm nào</div>`;
       btnScannerNext.disabled = true;
+      if (scannerBatchToolbar) scannerBatchToolbar.style.display = 'none';
       return;
     }
 
     btnScannerNext.disabled = false;
+    if (scannerBatchToolbar) scannerBatchToolbar.style.display = 'flex';
+
     const displayResults = scanner.results.slice(0, 50); // display first 50 results
     scannerResultsList.innerHTML = displayResults.map(item => `
       <div class="scanner-result-item">
         <div>
           <span class="scanner-addr">${item.formattedAddr}</span>
-          <span style="color: var(--text-dim); margin: 0 6px;">=</span>
+          <span style="color: var(--text-dim); margin: 0 4px;">=</span>
           <span class="scanner-val">${item.value}</span>
         </div>
         <div class="scanner-item-actions">
-          <button class="btn-mini btn-scanner-edit" data-addr="${item.address}">✏️ Sửa</button>
-          <button class="btn-mini btn-scanner-freeze" data-addr="${item.address}" data-val="${item.value}">❄️ Khóa</button>
+          <button class="btn-mini btn-scanner-edit" data-addr="${item.address}" title="Sửa giá trị ô nhớ này">✏️ Sửa</button>
+          <button class="btn-mini btn-scanner-freeze" data-addr="${item.address}" data-val="${item.value}" title="Đóng băng giá trị ô nhớ này">❄️ Khóa</button>
+          <button class="btn-mini btn-scanner-cheat" data-addr="${item.address}" data-val="${item.value}" title="Tạo mã Cheat GameShark/CodeBreaker">📋 Cheat</button>
         </div>
       </div>
     `).join('');
@@ -337,7 +385,7 @@ window.addEventListener('DOMContentLoaded', () => {
       scannerResultsList.innerHTML += `<div style="text-align: center; color: var(--text-dim); font-size: 0.75rem; padding: 6px;">(Hiển thị 50 / ${scanner.results.length} kết quả, hãy đổi giá trị trong game rồi bấm "Lọc Tiếp")</div>`;
     }
 
-    // Attach Edit & Freeze buttons
+    // Attach Edit, Freeze, and Cheat buttons
     scannerResultsList.querySelectorAll('.btn-scanner-edit').forEach(btn => {
       btn.addEventListener('click', () => {
         const addr = parseInt(btn.getAttribute('data-addr'), 10);
@@ -345,6 +393,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const newVal = prompt(`Nhập giá trị mới cho địa chỉ 0x${addr.toString(16).toUpperCase()}:`, currentVal);
         if (newVal !== null && newVal !== '') {
           scanner.writeValue(addr, Number(newVal));
+          showAppToast(`✏️ Đã sửa giá trị 0x${addr.toString(16).toUpperCase()} thành ${newVal}!`);
           btnScannerNext.click(); // refresh list
         }
       });
@@ -358,10 +407,66 @@ window.addEventListener('DOMContentLoaded', () => {
         if (freezeVal !== null && freezeVal !== '') {
           gba.addFreeze(addr, Number(freezeVal), scanner.valueType);
           renderScannerFrozenList();
+          showAppToast(`❄️ Đã khóa địa chỉ 0x${addr.toString(16).toUpperCase()} = ${freezeVal}!`);
+        }
+      });
+    });
+
+    scannerResultsList.querySelectorAll('.btn-scanner-cheat').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const addr = parseInt(btn.getAttribute('data-addr'), 10);
+        const currentVal = scanner.readValue(addr);
+        const cheatName = prompt(`Nhập tên mã Cheat cho 0x${addr.toString(16).toUpperCase()}:`, `Cheat ${addr.toString(16).toUpperCase()}`);
+        if (cheatName !== null && cheatName.trim() !== '') {
+          const ok = scanner.createCheat(addr, currentVal, cheatName.trim());
+          if (ok) {
+            showAppToast(`📋 Đã tạo mã Cheat "${cheatName}" thành công!`);
+            renderCheatsList();
+          }
         }
       });
     });
   };
+
+  // Batch Action Toolbar Handlers
+  document.getElementById('btn-batch-edit')?.addEventListener('click', () => {
+    if (scanner.results.length === 0) return;
+    const newVal = prompt(`Nhập giá trị mới để áp dụng cho tất cả ${scanner.results.length} địa chỉ:`);
+    if (newVal !== null && newVal.trim() !== '') {
+      scanner.editAll(Number(newVal));
+      showAppToast(`✏️ Đã sửa ${scanner.results.length} địa chỉ thành ${newVal}!`);
+      updateScannerUI();
+    }
+  });
+
+  document.getElementById('btn-batch-freeze')?.addEventListener('click', () => {
+    if (scanner.results.length === 0) return;
+    const confirmFreeze = confirm(`Bạn có muốn khóa toàn bộ ${scanner.results.length} địa chỉ ô nhớ này không?`);
+    if (confirmFreeze) {
+      scanner.freezeAll();
+      renderScannerFrozenList();
+      showAppToast(`❄️ Đã khóa ${scanner.results.length} địa chỉ ô nhớ!`);
+    }
+  });
+
+  document.getElementById('btn-batch-cheat')?.addEventListener('click', () => {
+    if (scanner.results.length === 0) return;
+    const name = prompt('Nhập tên cho mã cheat hàng loạt:', 'Mã Cheat Tìm Được');
+    if (name !== null && name.trim() !== '') {
+      const ok = scanner.createCheatForAll(name.trim());
+      if (ok) {
+        showAppToast(`📋 Đã tạo mã Cheat "${name}" thành công!`);
+        renderCheatsList();
+      }
+    }
+  });
+
+  document.getElementById('btn-batch-clear')?.addEventListener('click', () => {
+    scanner.reset();
+    scannerValInput.value = '';
+    scannerStatus.textContent = 'Đã xóa kết quả tìm kiếm.';
+    updateScannerUI();
+  });
 
   const renderScannerFrozenList = () => {
     if (!scannerFrozenList) return;
@@ -376,9 +481,29 @@ window.addEventListener('DOMContentLoaded', () => {
           <span style="font-family:monospace; font-weight:700; color:var(--accent-cyan);">0x${f.address.toString(16).padStart(8, '0').toUpperCase()}</span>
           <span style="color:#fff; margin-left:8px; font-weight:600;">Khóa: ${f.value} (${f.dataType})</span>
         </div>
-        <button class="btn-delete-freeze" data-addr="${f.address}" style="background:transparent; border:none; color:#ff4444; cursor:pointer; font-weight:bold;">✕</button>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <button class="btn-mini btn-freeze-to-cheat" data-addr="${f.address}" data-val="${f.value}" data-type="${f.dataType}" title="Chuyển thành Cheat Code">📋 Cheat</button>
+          <button class="btn-delete-freeze" data-addr="${f.address}" style="background:transparent; border:none; color:#ff4444; cursor:pointer; font-weight:bold; font-size:1rem;" title="Hủy khóa">✕</button>
+        </div>
       </div>
     `).join('');
+
+    scannerFrozenList.querySelectorAll('.btn-freeze-to-cheat').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const addr = parseInt(btn.getAttribute('data-addr'), 10);
+        const val = parseInt(btn.getAttribute('data-val'), 10);
+        const type = btn.getAttribute('data-type') || 'u16';
+        const name = prompt('Nhập tên mã cheat:', `Cheat 0x${addr.toString(16).toUpperCase()}`);
+        if (name !== null && name.trim() !== '') {
+          const code = scanner.generateCheatCode(addr, val, type);
+          if (code && gba.cheats?.addCheat) {
+            gba.cheats.addCheat(name.trim(), code);
+            showAppToast(`📋 Đã lưu vào Cheat: ${name}`);
+            renderCheatsList();
+          }
+        }
+      });
+    });
 
     scannerFrozenList.querySelectorAll('.btn-delete-freeze').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -391,24 +516,24 @@ window.addEventListener('DOMContentLoaded', () => {
 
   btnScannerFirst?.addEventListener('click', () => {
     const val = scannerValInput.value.trim();
-    if (val === '') {
+    if (scanner.compareType === 'exact' && val === '') {
       alert('Vui lòng nhập giá trị cần tìm!');
       return;
     }
     scanner.setValueType(scannerTypeSelect.value);
-    const results = scanner.searchFirst(Number(val));
-    scannerStatus.textContent = `Tìm thấy ${results.length} ô nhớ có giá trị ${val}. Hãy chơi tiếp để giá trị thay đổi rồi bấm "Lọc Tiếp".`;
+    const results = scanner.searchFirst(val !== '' ? Number(val) : null);
+    scannerStatus.textContent = `Tìm thấy ${results.length} ô nhớ (chế độ ${scanner.compareType}). Hãy thay đổi thông số trong game rồi bấm "Lọc Tiếp".`;
     updateScannerUI();
   });
 
   btnScannerNext?.addEventListener('click', () => {
     const val = scannerValInput.value.trim();
-    if (val === '') {
+    if (scanner.compareType === 'exact' && val === '') {
       alert('Vui lòng nhập giá trị mới để lọc tiếp!');
       return;
     }
-    const results = scanner.searchNext(Number(val));
-    scannerStatus.textContent = `Còn lại ${results.length} ô nhớ có giá trị ${val}.`;
+    const results = scanner.searchNext(val !== '' ? Number(val) : null);
+    scannerStatus.textContent = `Còn lại ${results.length} ô nhớ phù hợp điều kiện.`;
     updateScannerUI();
   });
 
