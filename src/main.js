@@ -4,6 +4,7 @@ import { GBAControls } from './ui/controls.js';
 import { GBALibrary } from './ui/library.js';
 import { GBAShaders } from './ui/shaders.js';
 import { GBAMemoryScanner } from './core/memory-scanner.js';
+import { OrientationManager } from './ui/orientation-manager.js';
 import { KEYS } from './core/gba-constants.js';
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -25,6 +26,8 @@ window.addEventListener('DOMContentLoaded', () => {
   const controls = new GBAControls(gba);
   const shaders = new GBAShaders(canvasWrapper);
   const scanner = new GBAMemoryScanner(gba);
+  const orientationMgr = new OrientationManager();
+  orientationMgr.init();
 
   // FPS Update Hook
   gba.onFpsUpdate = (fps) => {
@@ -474,8 +477,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const speedPresets = document.querySelectorAll('.btn-speed-preset');
 
   const updateSpeed = (val) => {
-    const num = Math.max(1.0, Math.min(5.0, parseFloat(val)));
+    const num = Math.max(1.0, Math.min(5.0, parseFloat(val) || 1.0));
     gba.speedMultiplier = num;
+    gba.fastForward = num > 1.001;
     const formatted = `${num.toFixed(num % 1 === 0 ? 1 : 2)}x`;
 
     if (speedSliderModal) speedSliderModal.value = num;
@@ -493,8 +497,8 @@ window.addEventListener('DOMContentLoaded', () => {
     } catch (e) {}
   };
 
-  // Load saved speed or default 2.0
-  const savedSpeed = localStorage.getItem('myboy_ff_speed') || '2.0';
+  // Load saved speed or default 1.0 (normal)
+  const savedSpeed = localStorage.getItem('myboy_ff_speed') || '1.0';
   updateSpeed(savedSpeed);
 
   speedSliderModal?.addEventListener('input', (e) => updateSpeed(e.target.value));

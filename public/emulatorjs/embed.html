@@ -122,9 +122,45 @@
 
       window.addEventListener('click', tryUnlockAudio);
       window.addEventListener('touchstart', tryUnlockAudio, { passive: true });
+
+      function applySpeed(fastForward, speedMultiplier) {
+        const ratio = Math.max(1, parseFloat(speedMultiplier) || 2.0);
+        const ejs = window.EJS_emulator;
+        const gm = ejs?.gameManager;
+
+        if (ejs) {
+          ejs.isFastForward = !!fastForward;
+          if (typeof ejs.changeSettingOption === 'function') {
+            try {
+              ejs.changeSettingOption('ff-ratio', ratio.toString());
+              ejs.changeSettingOption('fastForward', fastForward ? 'enabled' : 'disabled');
+            } catch (err) {}
+          }
+        }
+
+        if (gm) {
+          try {
+            if (gm.setFastForwardRatio) {
+              gm.setFastForwardRatio(ratio);
+            } else if (gm.functions?.setFastForwardRatio) {
+              gm.functions.setFastForwardRatio(ratio);
+            }
+
+            if (gm.toggleFastForward) {
+              gm.toggleFastForward(fastForward ? 1 : 0);
+            } else if (gm.functions?.toggleFastForward) {
+              gm.functions.toggleFastForward(fastForward ? 1 : 0);
+            }
+          } catch (err) {}
+        }
+      }
+
       window.addEventListener('message', function(e) {
-        if (e.data && e.data.type === 'EJS_RESUME_AUDIO') {
+        if (!e.data || typeof e.data !== 'object') return;
+        if (e.data.type === 'EJS_RESUME_AUDIO') {
           tryUnlockAudio();
+        } else if (e.data.type === 'EJS_SET_SPEED') {
+          applySpeed(e.data.fastForward, e.data.speedMultiplier);
         }
       });
 

@@ -1423,3 +1423,98 @@ html, body {
   outline-offset: 4px;
   box-shadow: 0 0 20px rgba(0, 242, 254, 0.7) !important;
 }
+
+/* --- Screen Orientation Lock Button --- */
+.orientation-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  min-width: 36px;
+  height: 32px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-main);
+  transition: all 0.2s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.orient-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.orient-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+/* Active Mode Styles */
+.orientation-btn.mode-portrait {
+  background: rgba(0, 242, 254, 0.16);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(0, 242, 254, 0.35);
+}
+
+.orientation-btn.mode-landscape {
+  background: rgba(255, 170, 0, 0.16);
+  border-color: #ffaa00;
+  color: #ffaa00;
+  box-shadow: 0 0 10px rgba(255, 170, 0, 0.35);
+}
+
+.orientation-btn.mode-auto {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--text-dim);
+}
+
+@media (max-width: 520px) {
+  .orient-badge {
+    display: none; /* Hide text badge on narrow screens for compact fit */
+  }
+  .orientation-btn {
+    padding: 0 6px;
+    min-width: 32px;
+  }
+}
+
+/* --- Floating Toast Notification --- */
+.app-toast {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: rgba(14, 16, 28, 0.94);
+  border: 1px solid var(--accent-cyan);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7), 0 0 14px rgba(0, 242, 254, 0.3);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #ffffff;
+  padding: 10px 20px;
+  border-radius: 25px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  z-index: 99999;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.25s;
+  white-space: nowrap;
+  max-width: 90vw;
+  text-align: center;
+}
+
+.app-toast.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}

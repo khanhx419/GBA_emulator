@@ -252,14 +252,45 @@ export class EmulatorAdapter {
   }
 
   _applySpeed() {
-    const gm = this._gameManager;
-    if (!gm) return;
-    if (this._fastForward) {
-      if (gm.toggleFastForward) gm.toggleFastForward(1);
-      if (gm.setFastForwardRatio) gm.setFastForwardRatio(this._speedMultiplier);
-    } else {
-      if (gm.toggleFastForward) gm.toggleFastForward(0);
-    }
+    const ratio = Math.max(1, parseFloat(this._speedMultiplier) || 2.0);
+    const isFF = !!this._fastForward;
+
+    // 1. Post message to iframe (reliable across frame boundaries)
+    try {
+      this.iframe?.contentWindow?.postMessage({
+        type: 'EJS_SET_SPEED',
+        fastForward: isFF,
+        speedMultiplier: ratio
+      }, '*');
+    } catch (e) {}
+
+    // 2. Direct calls if same-context accessible
+    try {
+      const ejs = this.iframe?.contentWindow?.EJS_emulator;
+      const gm = this._gameManager;
+
+      if (ejs) {
+        ejs.isFastForward = isFF;
+        if (typeof ejs.changeSettingOption === 'function') {
+          ejs.changeSettingOption('ff-ratio', ratio.toString());
+          ejs.changeSettingOption('fastForward', isFF ? 'enabled' : 'disabled');
+        }
+      }
+
+      if (gm) {
+        if (gm.setFastForwardRatio) {
+          gm.setFastForwardRatio(ratio);
+        } else if (gm.functions?.setFastForwardRatio) {
+          gm.functions.setFastForwardRatio(ratio);
+        }
+
+        if (gm.toggleFastForward) {
+          gm.toggleFastForward(isFF ? 1 : 0);
+        } else if (gm.functions?.toggleFastForward) {
+          gm.functions.toggleFastForward(isFF ? 1 : 0);
+        }
+      }
+    } catch (e) {}
   }
 
   // ===== SAVE / LOAD STATE =====

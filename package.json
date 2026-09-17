@@ -20,6 +20,7 @@
     "vite": "^6.2.0"
   },
   "dependencies": {
+    "@capacitor/screen-orientation": "^7.0.4",
     "gbajs": "^1.1.2"
   }
 }

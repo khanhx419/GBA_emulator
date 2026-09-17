@@ -130,6 +130,7 @@ export class GBAControls {
       if (e.code === 'Tab') {
         e.preventDefault();
         this.gba.fastForward = true;
+        document.getElementById('btn-fastforward')?.classList.add('active');
         return;
       }
       if (e.code === 'F1') {
@@ -156,6 +157,7 @@ export class GBAControls {
       if (e.code === 'Tab') {
         e.preventDefault();
         this.gba.fastForward = false;
+        document.getElementById('btn-fastforward')?.classList.remove('active');
         return;
       }
 
