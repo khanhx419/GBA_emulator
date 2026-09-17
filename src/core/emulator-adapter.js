@@ -44,6 +44,10 @@ export class EmulatorAdapter {
     // Pending ROM config for iframe handshake
     this._pendingGameConfig = null;
 
+    // Input state caching to prevent bridge flooding on touchmove
+    this._keyState = {};
+    this._audioUnlocked = false;
+
     // Create the iframe container inside canvas-wrapper
     this._setupIframe();
 
@@ -128,6 +132,8 @@ export class EmulatorAdapter {
     this.running = false;
     this.paused = false;
     this.romLoaded = false;
+    this._keyState = {};
+    this._audioUnlocked = false;
     if (this._fpsRafId) {
       cancelAnimationFrame(this._fpsRafId);
       this._fpsRafId = null;
@@ -206,7 +212,14 @@ export class EmulatorAdapter {
   // ===== INPUT =====
 
   setKeyDown(keyBit) {
-    this._resumeAudio();
+    if (this._keyState[keyBit]) return;
+    this._keyState[keyBit] = true;
+
+    if (!this._audioUnlocked) {
+      this._resumeAudio();
+      this._audioUnlocked = true;
+    }
+
     const gm = this._gameManager;
     if (!gm || !gm.simulateInput) return;
     const btn = this._keyBitToEJSButton(keyBit);
@@ -216,6 +229,9 @@ export class EmulatorAdapter {
   }
 
   setKeyUp(keyBit) {
+    if (!this._keyState[keyBit]) return;
+    this._keyState[keyBit] = false;
+
     const gm = this._gameManager;
     if (!gm || !gm.simulateInput) return;
     const btn = this._keyBitToEJSButton(keyBit);
@@ -274,23 +290,21 @@ export class EmulatorAdapter {
 
       if (ejs) {
         ejs.isFastForward = isFF;
-        if (typeof ejs.changeSettingOption === 'function') {
-          ejs.changeSettingOption('ff-ratio', ratio.toString());
-          ejs.changeSettingOption('fastForward', isFF ? 'enabled' : 'disabled');
+        if (ejs.settings) {
+          ejs.settings['ff-ratio'] = ratio.toString();
+          ejs.settings['fastForward'] = isFF ? 'enabled' : 'disabled';
         }
       }
 
       if (gm) {
-        if (gm.setFastForwardRatio) {
-          gm.setFastForwardRatio(ratio);
-        } else if (gm.functions?.setFastForwardRatio) {
-          gm.functions.setFastForwardRatio(ratio);
+        const setRatio = gm.setFastForwardRatio || gm.functions?.setFastForwardRatio;
+        if (setRatio) {
+          setRatio.call(gm, ratio);
         }
 
-        if (gm.toggleFastForward) {
-          gm.toggleFastForward(isFF ? 1 : 0);
-        } else if (gm.functions?.toggleFastForward) {
-          gm.functions.toggleFastForward(isFF ? 1 : 0);
+        const toggleFF = gm.toggleFastForward || gm.functions?.toggleFastForward;
+        if (toggleFF) {
+          toggleFF.call(gm, isFF ? 1 : 0);
         }
       }
     } catch (e) {}

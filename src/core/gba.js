@@ -244,12 +244,18 @@ export class GBA {
 
   // Key Input management
   setKeyDown(keyBit) {
+    if (this._keyState && this._keyState[keyBit]) return;
+    if (!this._keyState) this._keyState = {};
+    this._keyState[keyBit] = true;
     if (this.core && this.core.keypad) {
       this.core.keypad.keydown(keyBit);
     }
   }
 
   setKeyUp(keyBit) {
+    if (this._keyState && !this._keyState[keyBit]) return;
+    if (!this._keyState) this._keyState = {};
+    this._keyState[keyBit] = false;
     if (this.core && this.core.keypad) {
       this.core.keypad.keyup(keyBit);
     }

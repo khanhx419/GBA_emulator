@@ -149,7 +149,9 @@ class EJS_GameManager {
             "notification_show_fast_forward = false\n" +
             "video_message_pos_x = 2.0\n" +
             "video_message_pos_y = 2.0\n" +
-            "fastforward_ratio = 3.0\n" +
+            "fastforward_ratio = 5.0\n" +
+            "fastforward_frameskip = true\n" +
+            "audio_fastforward_mute = true\n" +
             "slowmotion_ratio = 3.0\n" +
             (this.EJS.rewindEnabled ? "rewind_enable = true\n" : "") +
             (this.EJS.rewindEnabled ? "rewind_granularity = 6\n" : "") +

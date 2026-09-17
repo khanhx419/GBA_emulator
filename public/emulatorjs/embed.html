@@ -66,7 +66,31 @@
     const cleanupObserver = new MutationObserver(() => {
       document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="virtualGamepad"], [class*="ejs_virtualGamepad"], [class*="ejs_menu_bar"], .ejs_message, [class*="ejs_message"]').forEach(el => el.remove());
     });
-    cleanupObserver.observe(document.body, { childList: true, subtree: true });
+    // Hook EJS_GameManager to guarantee fastforward_frameskip and audio_fastforward_mute
+    Object.defineProperty(window, 'EJS_GameManager', {
+      configurable: true,
+      enumerable: true,
+      get() { return this._EJS_GM; },
+      set(cls) {
+        this._EJS_GM = cls;
+        if (cls && cls.prototype) {
+          const origGetCfg = cls.prototype.getRetroArchCfg;
+          cls.prototype.getRetroArchCfg = function() {
+            let cfg = origGetCfg ? origGetCfg.call(this) : '';
+            if (!cfg.includes('fastforward_frameskip')) {
+              cfg += '\nfastforward_frameskip = true\n';
+            }
+            if (!cfg.includes('audio_fastforward_mute')) {
+              cfg += '\naudio_fastforward_mute = true\n';
+            }
+            if (!cfg.includes('video_font_enable')) {
+              cfg += '\nvideo_font_enable = false\nnotification_show_fast_forward = false\nvideo_message_pos_x = 2.0\nvideo_message_pos_y = 2.0\n';
+            }
+            return cfg;
+          };
+        }
+      }
+    });
 
     // Receive game configuration from parent
     window.addEventListener('message', function(event) {
@@ -109,15 +133,27 @@
             window.EJS_emulator.toggleVirtualGamepad(false);
           }
         }
-        // Ensure RetroArch config disables font / OSD notifications
+        // Ensure RetroArch config disables font / OSD notifications and enables frameskip + audio mute during fast-forward
         try {
           const gm = window.EJS_emulator?.gameManager;
           if (gm?.FS) {
             const cfgPath = '/home/web_user/.config/retroarch/retroarch.cfg';
             if (gm.FS.analyzePath(cfgPath).exists) {
               let cfg = new TextDecoder().decode(gm.FS.readFile(cfgPath));
+              let modified = false;
               if (!cfg.includes('video_font_enable')) {
                 cfg += '\nvideo_font_enable = false\nnotification_show_fast_forward = false\nvideo_message_pos_x = 2.0\nvideo_message_pos_y = 2.0\n';
+                modified = true;
+              }
+              if (!cfg.includes('fastforward_frameskip')) {
+                cfg += '\nfastforward_frameskip = true\n';
+                modified = true;
+              }
+              if (!cfg.includes('audio_fastforward_mute')) {
+                cfg += '\naudio_fastforward_mute = true\n';
+                modified = true;
+              }
+              if (modified) {
                 gm.FS.writeFile(cfgPath, cfg);
               }
             }
@@ -149,26 +185,22 @@
 
         if (ejs) {
           ejs.isFastForward = !!fastForward;
-          if (typeof ejs.changeSettingOption === 'function') {
-            try {
-              ejs.changeSettingOption('ff-ratio', ratio.toString());
-              ejs.changeSettingOption('fastForward', fastForward ? 'enabled' : 'disabled');
-            } catch (err) {}
+          if (ejs.settings) {
+            ejs.settings['ff-ratio'] = ratio.toString();
+            ejs.settings['fastForward'] = fastForward ? 'enabled' : 'disabled';
           }
         }
 
         if (gm) {
           try {
-            if (gm.setFastForwardRatio) {
-              gm.setFastForwardRatio(ratio);
-            } else if (gm.functions?.setFastForwardRatio) {
-              gm.functions.setFastForwardRatio(ratio);
+            const setRatio = gm.setFastForwardRatio || gm.functions?.setFastForwardRatio;
+            if (setRatio) {
+              setRatio.call(gm, ratio);
             }
 
-            if (gm.toggleFastForward) {
-              gm.toggleFastForward(fastForward ? 1 : 0);
-            } else if (gm.functions?.toggleFastForward) {
-              gm.functions.toggleFastForward(fastForward ? 1 : 0);
+            const toggleFF = gm.toggleFastForward || gm.functions?.toggleFastForward;
+            if (toggleFF) {
+              toggleFF.call(gm, fastForward ? 1 : 0);
             }
           } catch (err) {}
         }
