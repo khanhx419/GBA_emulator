@@ -300,14 +300,26 @@ export class EmulatorAdapter {
     if (!this.romLoaded || !gm) return null;
 
     try {
-      const stateInfo = gm.saveStateInfo();
-      const statePath = `/data/saves/state_slot${slot}.state`;
-      gm.loadState(statePath, 1); // 1 = save to path
+      let stateData = null;
+      if (typeof gm.getState === 'function') {
+        const u8 = gm.getState();
+        if (u8 && u8.length > 0) {
+          stateData = Array.from(u8);
+        }
+      } else if (gm.functions && typeof gm.functions.saveStateInfo === 'function') {
+        const parts = gm.functions.saveStateInfo().split('|');
+        if (parts[2] === '1') {
+          const size = parseInt(parts[0], 10);
+          const start = parseInt(parts[1], 10);
+          const arr = gm.Module.HEAPU8.subarray(start, start + size);
+          stateData = Array.from(arr);
+        }
+      }
 
-      let stateData = [];
-      try {
-        stateData = Array.from(gm.FS.readFile(statePath));
-      } catch (e) {}
+      if (!stateData || stateData.length === 0) {
+        console.warn('[GBA_K] Save state: failed to obtain state data');
+        return null;
+      }
 
       let screenshot = null;
       try {
@@ -341,11 +353,12 @@ export class EmulatorAdapter {
       if (!json) return false;
       const stateObj = JSON.parse(json);
 
-      if (stateObj.engine === 'emulatorjs' && stateObj.state) {
-        const statePath = `/data/saves/state_slot${slot}.state`;
-        gm.FS.writeFile(statePath, new Uint8Array(stateObj.state));
-        gm.loadState(statePath, 0); // 0 = load
-        return true;
+      if (stateObj.state && stateObj.state.length > 0) {
+        const u8 = new Uint8Array(stateObj.state);
+        if (typeof gm.loadState === 'function') {
+          gm.loadState(u8);
+          return true;
+        }
       }
       return false;
     } catch (e) {

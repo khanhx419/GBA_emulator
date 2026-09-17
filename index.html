@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content" />
   <title>GBA_K - Trình Giả Lập Game Boy Advance</title>
   <meta name="description" content="Trình giả lập Game Boy Advance (GBA_K) hỗ trợ load ROM .gba, Save State, Fast-Forward 1x-5x, Joystick tùy biến, Cheats, Memory Scanner và Shaders." />
   <script>
@@ -397,17 +397,19 @@
     <!-- Layout Editor Overlay -->
     <div id="layout-editor-overlay" class="layout-editor-overlay" style="display: none;">
       <div class="layout-editor-toolbar">
-        <span class="layout-editor-title">📐 Chỉnh Bố Cục</span>
+        <div class="layout-editor-header-row">
+          <span class="layout-editor-title">📐 Chỉnh Bố Cục</span>
+          <button class="btn-play-rom btn-mini" id="btn-layout-save" style="padding: 6px 16px; font-weight: 800;">💾 Lưu & Thoát</button>
+        </div>
         <div class="layout-editor-actions">
           <button class="tool-btn btn-mini" id="btn-layout-scale-down" title="Thu nhỏ nút đang chọn">➖ Thu nhỏ</button>
           <span id="layout-scale-badge" class="layout-scale-badge">100%</span>
           <button class="tool-btn btn-mini" id="btn-layout-scale-up" title="Phóng to nút đang chọn">➕ Phóng to</button>
           <button class="tool-btn btn-mini btn-danger" id="btn-layout-reset" title="Đặt lại vị trí mặc định">↺ Mặc định</button>
-          <button class="btn-play-rom btn-mini" id="btn-layout-save" style="padding: 6px 14px;">💾 Lưu & Thoát</button>
         </div>
       </div>
       <div class="layout-editor-hint">
-        👉 Nhấn chọn nút (sẽ có viền sáng) rồi kéo để di chuyển. Dùng ➕ / ➖ để chỉnh to/nhỏ.
+        👉 Nhấn chọn nút (viền sáng) rồi kéo để đổi vị trí. Bấm 💾 để lưu lại.
       </div>
     </div>
 

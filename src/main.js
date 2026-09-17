@@ -155,6 +155,19 @@ window.addEventListener('DOMContentLoaded', () => {
     handleLoadRom(demoBuffer, 'Neon_Blast_Demo.gba');
   });
 
+  // Global Toast Helper
+  const showAppToast = (message) => {
+    const toastEl = document.getElementById('app-toast');
+    if (!toastEl) return;
+    if (window._appToastTimer) clearTimeout(window._appToastTimer);
+    toastEl.textContent = message;
+    toastEl.classList.add('visible');
+    window._appToastTimer = setTimeout(() => {
+      toastEl.classList.remove('visible');
+    }, 2200);
+  };
+  window.showAppToast = showAppToast;
+
   // --- Save / Load States Grid ---
   const renderSaveSlots = () => {
     const grid = document.getElementById('save-slots-grid');
@@ -185,7 +198,16 @@ window.addEventListener('DOMContentLoaded', () => {
     grid.querySelectorAll('.btn-slot-save').forEach(btn => {
       btn.addEventListener('click', () => {
         const slot = parseInt(btn.getAttribute('data-slot'), 10);
-        gba.saveState(slot);
+        if (!gba.romLoaded) {
+          showAppToast('⚠️ Vui lòng mở game trước khi Lưu State!');
+          return;
+        }
+        const res = gba.saveState(slot);
+        if (res) {
+          showAppToast(`💾 Đã lưu thành công vào Slot ${slot}!`);
+        } else {
+          showAppToast(`❌ Lưu State Slot ${slot} thất bại!`);
+        }
         renderSaveSlots();
       });
     });
@@ -193,8 +215,15 @@ window.addEventListener('DOMContentLoaded', () => {
     grid.querySelectorAll('.btn-slot-load').forEach(btn => {
       btn.addEventListener('click', () => {
         const slot = parseInt(btn.getAttribute('data-slot'), 10);
+        if (!gba.romLoaded) {
+          showAppToast('⚠️ Vui lòng mở game trước khi Tải State!');
+          return;
+        }
         if (gba.loadState(slot)) {
+          showAppToast(`⚡ Đã tải State Slot ${slot}!`);
           closeAllModals();
+        } else {
+          showAppToast(`❌ Tải State Slot ${slot} thất bại!`);
         }
       });
     });

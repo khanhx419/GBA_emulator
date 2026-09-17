@@ -443,6 +443,9 @@ export class GBAControls {
 
       if (this.movementMode === 'floating') {
         base.style.opacity = '0.35';
+        base.style.position = 'relative';
+        base.style.left = '';
+        base.style.top = '';
       }
     };
 
@@ -507,6 +510,17 @@ export class GBAControls {
       }
     }, { passive: false });
 
+    // Handle switching apps, opening floating windows, or losing focus
+    window.addEventListener('blur', () => {
+      endStick();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        endStick();
+      }
+    });
+
     // Mouse events for desktop browser testing
     zone.addEventListener('mousedown', (e) => {
       if (this.isEditingLayout) return;
@@ -529,6 +543,16 @@ export class GBAControls {
   // Custom Layout Editor (Drag & Drop + Resize 60%-160% + Orientation Memory)
   // =========================================================================
   getOrientation() {
+    const saved = localStorage.getItem('gba_k_orientation_mode');
+    if (saved === 'portrait' || saved === 'landscape') {
+      return saved;
+    }
+    if (window.screen && window.screen.orientation && window.screen.orientation.type) {
+      return window.screen.orientation.type.includes('landscape') ? 'landscape' : 'portrait';
+    }
+    if (window.orientation !== undefined) {
+      return Math.abs(window.orientation) === 90 ? 'landscape' : 'portrait';
+    }
     return window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
   }
 
@@ -590,12 +614,20 @@ export class GBAControls {
     elements.forEach(({ id, el }) => {
       if (!el || !layout[id]) return;
       const item = layout[id];
-      if (item.left !== undefined && item.top !== undefined) {
-        el.style.position = 'fixed';
-        el.style.left = `${item.left}px`;
+      el.style.position = 'fixed';
+      if (item.bottom !== undefined) {
+        el.style.bottom = `${item.bottom}px`;
+        el.style.top = 'auto';
+      } else if (item.top !== undefined) {
         el.style.top = `${item.top}px`;
-        el.style.right = 'auto';
         el.style.bottom = 'auto';
+      }
+      if (item.left !== undefined) {
+        el.style.left = `${item.left}px`;
+        el.style.right = 'auto';
+      } else if (item.right !== undefined) {
+        el.style.right = `${item.right}px`;
+        el.style.left = 'auto';
       }
       const scale = item.scale !== undefined ? item.scale : 1.0;
       this.scales[id] = scale;
@@ -606,12 +638,20 @@ export class GBAControls {
     // Synchronize joystick-zone with dpad-container coordinates and scale
     if (joyEl && layout['dpad-container']) {
       const item = layout['dpad-container'];
-      if (item.left !== undefined && item.top !== undefined) {
-        joyEl.style.position = 'fixed';
-        joyEl.style.left = `${item.left}px`;
+      joyEl.style.position = 'fixed';
+      if (item.bottom !== undefined) {
+        joyEl.style.bottom = `${item.bottom}px`;
+        joyEl.style.top = 'auto';
+      } else if (item.top !== undefined) {
         joyEl.style.top = `${item.top}px`;
-        joyEl.style.right = 'auto';
         joyEl.style.bottom = 'auto';
+      }
+      if (item.left !== undefined) {
+        joyEl.style.left = `${item.left}px`;
+        joyEl.style.right = 'auto';
+      } else if (item.right !== undefined) {
+        joyEl.style.right = `${item.right}px`;
+        joyEl.style.left = 'auto';
       }
       const scale = item.scale !== undefined ? item.scale : 1.0;
       joyEl.style.transform = `scale(${scale})`;
@@ -645,9 +685,16 @@ export class GBAControls {
       this.resetLayout();
     });
 
-    document.getElementById('btn-layout-save')?.addEventListener('click', () => {
-      this.saveLayout();
-    });
+    const saveBtn = document.getElementById('btn-layout-save');
+    if (saveBtn) {
+      const handleSave = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.saveLayout();
+      };
+      saveBtn.addEventListener('click', handleSave);
+      saveBtn.addEventListener('touchend', handleSave);
+    }
 
     // Setup drag events for the customizable control clusters
     this.setupElementDrag('dpad-container');
@@ -848,16 +895,32 @@ export class GBAControls {
   saveLayout() {
     const orientation = this.getOrientation();
     const config = {};
+    const winH = window.innerHeight;
+    const winW = window.innerWidth;
 
     ['dpad-container', 'action-buttons-container', 'shoulder-container'].forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      config[id] = {
-        left: Math.round(rect.left),
-        top: Math.round(rect.top),
-        scale: this.scales[id] || 1.0
-      };
+      if (id === 'shoulder-container') {
+        config[id] = {
+          top: Math.round(rect.top),
+          left: Math.round(rect.left),
+          scale: this.scales[id] || 1.0
+        };
+      } else if (id === 'action-buttons-container') {
+        config[id] = {
+          bottom: Math.round(winH - rect.bottom),
+          right: Math.round(winW - rect.right),
+          scale: this.scales[id] || 1.0
+        };
+      } else {
+        config[id] = {
+          bottom: Math.round(winH - rect.bottom),
+          left: Math.round(rect.left),
+          scale: this.scales[id] || 1.0
+        };
+      }
     });
 
     try {
@@ -869,6 +932,9 @@ export class GBAControls {
       this.gba.resume();
       const powerLed = document.getElementById('power-led');
       if (powerLed) powerLed.classList.remove('paused');
+    }
+    if (window.showAppToast) {
+      window.showAppToast('💾 Đã lưu bố cục phím thành công!');
     }
   }
 
