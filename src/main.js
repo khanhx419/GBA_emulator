@@ -5,6 +5,8 @@ import { GBALibrary } from './ui/library.js';
 import { GBAShaders } from './ui/shaders.js';
 import { GBAMemoryScanner } from './core/memory-scanner.js';
 import { OrientationManager } from './ui/orientation-manager.js';
+import { saveStateManager } from './core/save-state-manager.js';
+import { downloadFile } from './core/download-helper.js';
 import { KEYS } from './core/gba-constants.js';
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -264,10 +266,54 @@ window.addEventListener('DOMContentLoaded', () => {
       const reader = new FileReader();
       reader.onload = (e) => {
         gba.importSavFile(e.target.result);
-        alert('Đã nhập file lưu .sav thành công!');
         closeAllModals();
       };
       reader.readAsArrayBuffer(savFileInput.files[0]);
+    }
+  });
+
+  // Backup & Restore All Save States + Cheats
+  document.getElementById('btn-backup-all')?.addEventListener('click', async () => {
+    try {
+      const romTitle = gba.romTitle || '';
+      const backup = await saveStateManager.exportBackup(romTitle);
+      const jsonStr = JSON.stringify(backup, null, 2);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const fileName = `GBA_K_Backup_${romTitle || 'all'}_${dateStr}.json`;
+      const ok = downloadFile(fileName, new TextEncoder().encode(jsonStr), 'application/json');
+      if (ok) {
+        showAppToast(`📦 Đã sao lưu ${backup.states.length} slot vào file ${fileName}!`);
+      }
+    } catch (e) {
+      console.error('Backup error:', e);
+      showAppToast('❌ Lỗi khi sao lưu: ' + e.message);
+    }
+  });
+
+  const backupFileInput = document.getElementById('file-backup-input');
+  document.getElementById('btn-restore-all')?.addEventListener('click', () => {
+    backupFileInput?.click();
+  });
+
+  backupFileInput?.addEventListener('change', () => {
+    if (backupFileInput.files.length > 0) {
+      const file = backupFileInput.files[0];
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const count = await saveStateManager.importBackup(e.target.result);
+          if (count > 0) {
+            showAppToast(`📥 Đã khôi phục thành công ${count} Save State!`);
+            renderSaveSlots();
+            renderCheatsList();
+          } else {
+            showAppToast('⚠️ Không tìm thấy Save State nào trong file!');
+          }
+        } catch (err) {
+          showAppToast('❌ File sao lưu không hợp lệ!');
+        }
+      };
+      reader.readAsText(file);
     }
   });
 

@@ -1,6 +1,7 @@
 import GameBoyAdvance from './engine/gba.js';
 import { GBACheats } from './cheats.js';
 import { saveStateManager } from './save-state-manager.js';
+import { downloadFile } from './download-helper.js';
 
 export class GBA {
   constructor(canvas) {
@@ -333,14 +334,17 @@ export class GBA {
 
   // Export Battery Save (.sav)
   exportSavFile() {
-    if (!this.romLoaded || !this.core.mmu.save) return;
-    const blob = new Blob([new Uint8Array(this.core.mmu.save.buffer)], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${this.romTitle || 'game'}.sav`;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!this.romLoaded || !this.core.mmu.save) {
+      if (window.showAppToast) window.showAppToast('⚠️ Game chưa có dữ liệu lưu!');
+      return false;
+    }
+    const buf = new Uint8Array(this.core.mmu.save.buffer);
+    const fileName = `${this.romTitle || 'game'}.sav`;
+    const ok = downloadFile(fileName, buf);
+    if (ok && window.showAppToast) {
+      window.showAppToast(`📤 Đã xuất file ${fileName} thành công!`);
+    }
+    return ok;
   }
 
   importSavFile(arrayBuffer) {

@@ -9,6 +9,7 @@
  */
 
 import { saveStateManager } from './save-state-manager.js';
+import { downloadFile } from './download-helper.js';
 
 export class EmulatorAdapter {
   constructor(canvas) {
@@ -589,36 +590,126 @@ export class EmulatorAdapter {
 
   exportSavFile() {
     const gm = this._gameManager;
-    if (!this.romLoaded || !gm) return;
+    if (!this.romLoaded || !gm) {
+      if (window.showAppToast) window.showAppToast('⚠️ Vui lòng mở game trước khi xuất file .SAV!');
+      return false;
+    }
+
     try {
-      if (gm.saveSaveFiles) gm.saveSaveFiles();
-      const savePath = gm.getSaveFilePath ? gm.getSaveFilePath() : null;
-      if (savePath && gm.FS) {
-        const saveData = gm.FS.readFile(savePath);
-        const blob = new Blob([saveData], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${this.romTitle || 'game'}.sav`;
-        a.click();
-        URL.revokeObjectURL(url);
+      // 1. Force flush SRAM from core to filesystem
+      if (typeof gm.saveSaveFiles === 'function') {
+        gm.saveSaveFiles();
+      } else if (gm.functions?.saveSaveFiles) {
+        gm.functions.saveSaveFiles();
       }
+
+      // 2. Obtain save data buffer
+      let saveData = null;
+      if (typeof gm.getSaveFile === 'function') {
+        saveData = gm.getSaveFile(false);
+      }
+
+      if (!saveData && gm.getSaveFilePath && gm.FS) {
+        const savePath = gm.getSaveFilePath();
+        if (savePath && gm.FS.analyzePath(savePath).exists) {
+          saveData = gm.FS.readFile(savePath);
+        }
+      }
+
+      // 3. Fallback: search common save paths in Emscripten MEMFS
+      if (!saveData && gm.FS) {
+        const title = this.romTitle || 'game';
+        const candidates = [
+          `/data/saves/${title}.srm`,
+          `/data/saves/${title}.sav`,
+          `/${title}.srm`,
+          `/${title}.sav`,
+          `/data/saves/game.srm`,
+          `/data/saves/game.sav`,
+          `/game.srm`,
+          `/game.sav`
+        ];
+        for (const p of candidates) {
+          try {
+            if (gm.FS.analyzePath(p).exists) {
+              saveData = gm.FS.readFile(p);
+              break;
+            }
+          } catch (e) {}
+        }
+      }
+
+      if (!saveData || saveData.length === 0) {
+        if (window.showAppToast) {
+          window.showAppToast('⚠️ Game chưa có dữ liệu lưu! Hãy vào menu game (Start -> Save) trước.');
+        }
+        return false;
+      }
+
+      const fileName = `${this.romTitle || 'game'}.sav`;
+      const ok = downloadFile(fileName, saveData);
+      if (ok && window.showAppToast) {
+        window.showAppToast(`📤 Đã xuất file ${fileName} thành công!`);
+      }
+      return ok;
     } catch (e) {
-      console.warn('[GBA_K] Export save error:', e);
+      console.error('[GBA_K] Export save error:', e);
+      if (window.showAppToast) {
+        window.showAppToast('❌ Lỗi khi xuất file .SAV: ' + e.message);
+      }
+      return false;
     }
   }
 
   importSavFile(arrayBuffer) {
     const gm = this._gameManager;
-    if (!gm) return;
+    if (!gm || !gm.FS) {
+      if (window.showAppToast) window.showAppToast('⚠️ Vui lòng mở game trước khi nạp file .SAV!');
+      return false;
+    }
     try {
+      const u8 = arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer);
       const savePath = gm.getSaveFilePath ? gm.getSaveFilePath() : null;
-      if (savePath && gm.FS) {
-        gm.FS.writeFile(savePath, new Uint8Array(arrayBuffer));
-        if (gm.loadSaveFiles) gm.loadSaveFiles();
+      if (savePath) {
+        gm.FS.writeFile(savePath, u8);
       }
+      // Also write to common candidates so RetroArch finds it
+      const title = this.romTitle || 'game';
+      const paths = [
+        savePath,
+        `/data/saves/${title}.srm`,
+        `/data/saves/${title}.sav`,
+        `/${title}.srm`,
+        `/${title}.sav`
+      ].filter(Boolean);
+
+      for (const p of paths) {
+        try {
+          gm.FS.writeFile(p, u8);
+        } catch (e) {}
+      }
+
+      if (typeof gm.loadSaveFiles === 'function') {
+        gm.loadSaveFiles();
+      } else if (gm.functions?.loadSaveFiles) {
+        gm.functions.loadSaveFiles();
+      }
+
+      if (window.showAppToast) {
+        window.showAppToast('📥 Đã nạp file .SAV! Đang khởi động lại để nhận file lưu...');
+      }
+
+      setTimeout(() => {
+        this.reset();
+      }, 500);
+
+      return true;
     } catch (e) {
-      console.warn('[GBA_K] Import save error:', e);
+      console.error('[GBA_K] Import save error:', e);
+      if (window.showAppToast) {
+        window.showAppToast('❌ Lỗi khi nạp file .SAV: ' + e.message);
+      }
+      return false;
     }
   }
 

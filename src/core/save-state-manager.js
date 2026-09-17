@@ -212,6 +212,104 @@ export class SaveStateManager {
 
     return null;
   }
+
+  async exportBackup(romTitle) {
+    await this._initPromise;
+    const backup = {
+      app: 'GBA_K',
+      version: 1,
+      timestamp: Date.now(),
+      romTitle: romTitle || 'default',
+      states: [],
+      cheats: null
+    };
+
+    // 1. Collect states from IndexedDB
+    if (this.db) {
+      await new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('states', 'readonly');
+          const store = tx.objectStore('states');
+          const req = store.openCursor();
+          req.onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (cursor) {
+              const val = cursor.value;
+              if (!romTitle || val.romTitle === romTitle || val.key.includes(romTitle)) {
+                backup.states.push({
+                  key: val.key,
+                  romTitle: val.romTitle,
+                  slot: val.slot,
+                  timestamp: val.timestamp,
+                  screenshot: val.screenshot,
+                  stateBase64: this._uint8ToBase64(val.state)
+                });
+              }
+              cursor.continue();
+            } else {
+              resolve();
+            }
+          };
+          req.onerror = () => resolve();
+        } catch (e) {
+          resolve();
+        }
+      });
+    }
+
+    // 2. Include cheats
+    try {
+      const cheatKey = 'myboy_cheats_' + (romTitle || 'default');
+      backup.cheats = localStorage.getItem(cheatKey);
+    } catch (e) {}
+
+    return backup;
+  }
+
+  async importBackup(backupData) {
+    await this._initPromise;
+    const data = typeof backupData === 'string' ? JSON.parse(backupData) : backupData;
+    if (!data || !Array.isArray(data.states)) return 0;
+
+    let importedCount = 0;
+    for (const item of data.states) {
+      if (item.stateBase64) {
+        const u8 = this._base64ToUint8(item.stateBase64);
+        await this.saveState(item.romTitle || data.romTitle, item.slot, u8, item.screenshot);
+        importedCount++;
+      }
+    }
+
+    if (data.cheats && (data.romTitle || romTitle)) {
+      try {
+        const key = 'myboy_cheats_' + (data.romTitle || 'default');
+        localStorage.setItem(key, typeof data.cheats === 'string' ? data.cheats : JSON.stringify(data.cheats));
+      } catch (e) {}
+    }
+
+    return importedCount;
+  }
+
+  _uint8ToBase64(u8) {
+    const bytes = u8 instanceof Uint8Array ? u8 : new Uint8Array(u8);
+    let binary = '';
+    const len = bytes.byteLength;
+    const chunkSize = 8192;
+    for (let i = 0; i < len; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunkSize, len)));
+    }
+    return btoa(binary);
+  }
+
+  _base64ToUint8(b64) {
+    const binary = atob(b64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
 }
 
 export const saveStateManager = new SaveStateManager();
