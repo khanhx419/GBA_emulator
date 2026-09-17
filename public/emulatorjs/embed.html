@@ -83,6 +83,9 @@
             if (!cfg.includes('audio_fastforward_mute')) {
               cfg += '\naudio_fastforward_mute = true\n';
             }
+            if (!cfg.includes('audio_sync = false')) {
+              cfg += '\naudio_sync = false\naudio_rate_control = false\nvideo_vsync = false\n';
+            }
             if (!cfg.includes('video_font_enable')) {
               cfg += '\nvideo_font_enable = false\nnotification_show_fast_forward = false\nvideo_message_pos_x = 2.0\nvideo_message_pos_y = 2.0\n';
             }
@@ -153,9 +156,23 @@
                 cfg += '\naudio_fastforward_mute = true\n';
                 modified = true;
               }
+              if (!cfg.includes('audio_sync = false')) {
+                cfg += '\naudio_sync = false\naudio_rate_control = false\nvideo_vsync = false\n';
+                modified = true;
+              }
               if (modified) {
                 gm.FS.writeFile(cfgPath, cfg);
               }
+            }
+          }
+          // Enable mGBA core frameskip & idle optimization directly via runtime Cwrap
+          if (gm) {
+            const setVar = gm.setVariable || gm.functions?.setVariable;
+            if (setVar) {
+              setVar.call(gm, 'mgba_frameskip', 'auto');
+              setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
+              setVar.call(gm, 'mgba_interframe_blending', 'disabled');
+              setVar.call(gm, 'mgba_color_correction', 'disabled');
             }
           }
         } catch (e) {}
@@ -201,6 +218,12 @@
             const toggleFF = gm.toggleFastForward || gm.functions?.toggleFastForward;
             if (toggleFF) {
               toggleFF.call(gm, fastForward ? 1 : 0);
+            }
+
+            const setVar = gm.setVariable || gm.functions?.setVariable;
+            if (setVar) {
+              setVar.call(gm, 'mgba_frameskip', fastForward ? 'auto' : 'disabled');
+              setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
             }
           } catch (err) {}
         }

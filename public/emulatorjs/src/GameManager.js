@@ -37,6 +37,13 @@ class EJS_GameManager {
 
         this.writeFile("/home/web_user/.config/retroarch/retroarch.cfg", this.getRetroArchCfg());
 
+        const mgbaOpt = 'mgba_frameskip = "auto"\n' +
+            'mgba_idle_optimization = "Remove Known"\n' +
+            'mgba_interframe_blending = "disabled"\n' +
+            'mgba_color_correction = "disabled"\n';
+        this.writeFile("/home/web_user/.config/retroarch/retroarch-core-options.cfg", mgbaOpt);
+        this.writeFile("/home/web_user/retroarch/userdata/config/mgba/mgba.opt", mgbaOpt);
+
         this.writeConfigFile();
         this.initShaders();
         this.setupPreLoadSettings();
@@ -143,13 +150,15 @@ class EJS_GameManager {
             "video_gpu_screenshot = false\n" +
             "audio_latency = 64\n" +
             "video_top_portrait_viewport = true\n" +
-            "video_vsync = true\n" +
+            "video_vsync = false\n" +
+            "audio_sync = false\n" +
+            "audio_rate_control = false\n" +
             "video_smooth = false\n" +
             "video_font_enable = false\n" +
             "notification_show_fast_forward = false\n" +
             "video_message_pos_x = 2.0\n" +
             "video_message_pos_y = 2.0\n" +
-            "fastforward_ratio = 5.0\n" +
+            "fastforward_ratio = 0.0\n" +
             "fastforward_frameskip = true\n" +
             "audio_fastforward_mute = true\n" +
             "slowmotion_ratio = 3.0\n" +

@@ -260,13 +260,17 @@ export class EmulatorAdapter {
 
   get fastForward() { return this._fastForward; }
   set fastForward(val) {
-    this._fastForward = val;
+    const bool = !!val;
+    if (this._fastForward === bool) return;
+    this._fastForward = bool;
     this._applySpeed();
   }
 
   get speedMultiplier() { return this._speedMultiplier; }
   set speedMultiplier(val) {
-    this._speedMultiplier = val;
+    const num = parseFloat(val) || 1.0;
+    if (this._speedMultiplier === num) return;
+    this._speedMultiplier = num;
     this._applySpeed();
   }
 
@@ -585,16 +589,29 @@ export class EmulatorAdapter {
     if (this._fpsRafId) cancelAnimationFrame(this._fpsRafId);
     this._fpsFrames = 0;
     this._fpsLastTime = performance.now();
+    let lastFrameNum = 0;
 
     const tick = () => {
-      this._fpsFrames++;
       const now = performance.now();
+      const gm = this._gameManager;
       if (now - this._fpsLastTime >= 1000) {
-        this.fps = this._fpsFrames;
+        if (gm && typeof gm.getFrameNum === 'function') {
+          const currentFrameNum = gm.getFrameNum();
+          if (currentFrameNum > 0 && lastFrameNum > 0) {
+            const diff = currentFrameNum - lastFrameNum;
+            this.fps = Math.max(0, diff);
+          } else {
+            this.fps = this._fpsFrames;
+          }
+          lastFrameNum = currentFrameNum;
+        } else {
+          this.fps = this._fpsFrames;
+        }
         this._fpsFrames = 0;
         this._fpsLastTime = now;
         if (this.onFpsUpdate) this.onFpsUpdate(this.fps);
       }
+      this._fpsFrames++;
       this._fpsRafId = requestAnimationFrame(tick);
     };
     tick();

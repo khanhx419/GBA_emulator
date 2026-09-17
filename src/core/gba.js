@@ -181,42 +181,37 @@ export class GBA {
     const dt = Math.min(now - (this.lastFrameTime || now), 100);
     this.lastFrameTime = now;
 
-    // Accumulator-based pacing: works correctly for all speeds and refresh rates
-    this.accumulator += dt * targetSpeed;
-
-    // Cap accumulator to prevent spiral of death (max ~5 frames behind)
-    const maxAccumulator = frameInterval * 5;
-    if (this.accumulator > maxAccumulator) {
-      this.accumulator = maxAccumulator;
-    }
-
-    let framesRun = 0;
-    const maxFramesPerTick = Math.max(2, Math.ceil(targetSpeed) + 1);
-
-    while (this.accumulator >= frameInterval - 1.5 && framesRun < maxFramesPerTick) {
-      // Intelligent Adaptive Frame-skip:
-      // When lagging behind (accumulator >= frameInterval * 2) or running at high speed (>= 2x),
-      // skip expensive Canvas putImageData and software scanline compositing on intermediate catch-up frames.
-      // This prevents the "spiral of death" and maintains smooth 60 FPS pacing even on low-spec phones!
-      const isCatchingUp = (this.accumulator >= frameInterval * 2) && (framesRun < maxFramesPerTick - 1);
-      const shouldSkipDraw = (targetSpeed >= 2 && this.accumulator >= frameInterval * 2) || isCatchingUp;
-
-      if (this.core && this.core.video) {
-        this.core.video.skipDraw = shouldSkipDraw;
+    if (targetSpeed <= 1.05) {
+      // 1.0x Normal Speed: Smooth RAF pacing with 1.5ms VSync tolerance
+      this.accumulator += dt;
+      let framesRun = 0;
+      while (this.accumulator >= frameInterval - 1.5 && framesRun < 2) {
+        if (this.core && this.core.video) this.core.video.skipDraw = false;
+        this.runFrame();
+        this.accumulator -= frameInterval;
+        this.framesCount++;
+        framesRun++;
       }
-
-      this.runFrame();
-      this.accumulator -= frameInterval;
-      this.framesCount++;
-      framesRun++;
-    }
-
-    if (this.core && this.core.video) {
-      this.core.video.skipDraw = false;
-    }
-
-    // Prevent negative drift
-    if (this.accumulator < -frameInterval) {
+      if (this.accumulator > frameInterval || this.accumulator < -frameInterval) {
+        this.accumulator = 0;
+      }
+    } else {
+      // Fast Forward: Run fixed framesPerTick (e.g. 2, 3, 5).
+      // Crucial: Intermediate frames SKIP drawing entirely (no scanline compositing, no putImageData).
+      // Only the final frame renders to the canvas.
+      // Reset accumulator to 0 to prevent backlog spirals during heavy battle animations!
+      const framesToRun = Math.max(1, Math.min(8, Math.round(targetSpeed)));
+      for (let i = 0; i < framesToRun; i++) {
+        const isLastFrame = (i === framesToRun - 1);
+        if (this.core && this.core.video) {
+          this.core.video.skipDraw = !isLastFrame;
+        }
+        this.runFrame();
+        this.framesCount++;
+      }
+      if (this.core && this.core.video) {
+        this.core.video.skipDraw = false;
+      }
       this.accumulator = 0;
     }
 
