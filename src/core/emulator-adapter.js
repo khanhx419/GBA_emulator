@@ -860,16 +860,24 @@ export class EmulatorAdapter {
         localStorage.setItem('gba_sav_backup_' + safeTitle, btoa(binary));
       } catch (e) {}
 
-      if (window.showAppToast) {
-        window.showAppToast('📥 Đã nạp file .SAV! Đang khởi động lại để nhận dữ liệu lưu...');
-      }
-
-      // 4. CRITICAL: Clean iframe reboot!
-      // This prevents RetroArch's exit/restart hook from dumping stale in-memory RAM back to disk,
-      // and ensures the new instance cleanly mounts IndexedDB and loads the imported save at boot!
-      setTimeout(() => {
+      // 4. Reload save into core and restart game immediately without black screen
+      if (gm) {
+        try {
+          if (typeof gm.loadSaveFiles === 'function') {
+            gm.loadSaveFiles();
+          }
+        } catch (e) {}
+        try {
+          if (typeof gm.restart === 'function') {
+            gm.restart();
+          }
+        } catch (e) {}
+        if (window.showAppToast) {
+          window.showAppToast('⚡ Đã nạp file .SAV và khởi động lại game thành công!');
+        }
+      } else if (this._pendingGameConfig) {
         this.reboot();
-      }, 500);
+      }
 
       return true;
     } catch (e) {

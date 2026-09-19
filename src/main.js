@@ -38,6 +38,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // ROM Loading Callback
   const handleLoadRom = (arrayBuffer, fileName) => {
+    try {
+      localStorage.setItem('gba_k_last_played_rom', fileName);
+    } catch (e) {}
     gba.loadRom(arrayBuffer, fileName);
     romBadge.textContent = gba.getRomTitle() || fileName;
     powerLed.classList.remove('paused');
@@ -316,11 +319,54 @@ window.addEventListener('DOMContentLoaded', () => {
     if (savFileInput.files && savFileInput.files.length > 0) {
       const file = savFileInput.files[0];
       const reader = new FileReader();
-      reader.onload = (e) => {
-        gba.importSavFile(e.target.result, file.name);
-        closeAllModals();
+      reader.onload = async (e) => {
+        const savBuf = e.target.result;
         savFileInput.value = '';
-        updateBatterySaveBadge();
+
+        if (gba.romLoaded) {
+          await gba.importSavFile(savBuf, file.name);
+          closeAllModals();
+          updateBatterySaveBadge();
+          return;
+        }
+
+        // If no ROM currently running, try to find matching ROM in library
+        try {
+          const roms = await library.getAllRoms();
+          const baseName = file.name.replace(/\.[^/.]+$/, '').toLowerCase();
+          let matchedRom = roms.find(r => {
+            const rName = r.name.toLowerCase();
+            return rName.includes(baseName) || baseName.includes(r.name.replace(/\.[^/.]+$/, '').toLowerCase());
+          });
+
+          if (!matchedRom && roms.length > 0) {
+            const lastPlayed = localStorage.getItem('gba_k_last_played_rom');
+            matchedRom = roms.find(r => r.name === lastPlayed) || roms[0];
+          }
+
+          if (matchedRom && matchedRom.data) {
+            showAppToast(`🎮 Đang mở game ${matchedRom.name} với file save vừa nạp...`);
+            const title = matchedRom.name.replace(/\.[^/.]+$/, '').trim();
+            let binary = '';
+            const u8 = new Uint8Array(savBuf);
+            for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
+            try {
+              localStorage.setItem('gba_sav_backup_' + title, btoa(binary));
+            } catch (err) {}
+            if (gba._currentSaveData !== undefined) {
+              gba._currentSaveData = u8;
+            }
+            handleLoadRom(matchedRom.data, matchedRom.name);
+            closeAllModals();
+            return;
+          }
+        } catch (err) {
+          console.warn('Match ROM on sav import error:', err);
+        }
+
+        await gba.importSavFile(savBuf, file.name);
+        closeAllModals();
+        showAppToast('📥 Đã lưu file .SAV! Vui lòng mở file ROM game (.gba) từ Thư viện để bắt đầu.');
       };
       reader.readAsArrayBuffer(file);
     }
@@ -891,13 +937,20 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Auto load last played ROM if available
   setTimeout(async () => {
-    const roms = await library.getAllRoms();
-    // Filter out any old dummy demo files
-    const realRoms = roms.filter(r => r.name !== 'Neon_Blast_Demo.gba' && r.size > 1024);
-    if (realRoms.length > 0) {
-      handleLoadRom(realRoms[0].data, realRoms[0].name);
-    } else {
-      romBadge.textContent = 'Nhấn 📂 để mở ROM GBA';
+    try {
+      const roms = await library.getAllRoms();
+      const realRoms = roms.filter(r => r.name !== 'Neon_Blast_Demo.gba' && r.size > 1024);
+      if (realRoms.length > 0) {
+        const lastPlayedName = localStorage.getItem('gba_k_last_played_rom');
+        const targetRom = realRoms.find(r => r.name === lastPlayedName) || realRoms[0];
+        if (targetRom && targetRom.data && !gba.romLoaded) {
+          handleLoadRom(targetRom.data, targetRom.name);
+        }
+      } else {
+        romBadge.textContent = 'Nhấn 📂 để mở ROM GBA';
+      }
+    } catch (e) {
+      console.warn('Auto load ROM error:', e);
     }
   }, 150);
 });
