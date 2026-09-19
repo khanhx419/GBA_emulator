@@ -86,7 +86,8 @@ export class EmulatorAdapter {
           this.iframe.contentWindow.postMessage({
             type: 'EJS_INIT_GAME',
             gameUrl: this._pendingGameConfig.gameUrl,
-            gameName: this._pendingGameConfig.gameName
+            gameName: this._pendingGameConfig.gameName,
+            initialSaveData: this._pendingGameConfig.initialSaveData
           }, '*');
         }
       } else if (event.data.type === 'EJS_GAME_STARTED') {
@@ -110,6 +111,10 @@ export class EmulatorAdapter {
       } else if (event.data.type === 'EJS_BATTERY_SAVE_UPDATED') {
         const u8 = new Uint8Array(event.data.data);
         if (u8 && u8.length > 0) {
+          this._currentSaveData = u8;
+          if (this._pendingGameConfig) {
+            this._pendingGameConfig.initialSaveData = Array.from(u8);
+          }
           const gm = this._gameManager;
           const savePath = gm?.getSaveFilePath ? gm.getSaveFilePath() : null;
           writeSavToIndexedDB(this.romTitle, this.romName, u8, savePath ? [savePath] : []);
@@ -189,10 +194,28 @@ export class EmulatorAdapter {
     const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
     const blobUrl = URL.createObjectURL(blob);
 
+    // Restore previous session save data if available
+    let initialSave = this._currentSaveData;
+    if (!initialSave) {
+      const b64 = localStorage.getItem('gba_sav_backup_' + this.romTitle);
+      if (b64) {
+        try {
+          const raw = atob(b64);
+          const u8 = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) u8[i] = raw.charCodeAt(i);
+          initialSave = u8;
+        } catch (e) {}
+      }
+    }
+    if (initialSave) {
+      this._currentSaveData = initialSave;
+    }
+
     // Save pending config for handshake
     this._pendingGameConfig = {
       gameUrl: blobUrl,
-      gameName: this.romTitle + '.gba' // Ensure extension for mGBA
+      gameName: this.romTitle + '.gba', // Ensure extension for mGBA
+      initialSaveData: this._currentSaveData ? Array.from(this._currentSaveData) : null
     };
 
     // Reload iframe cleanly to destroy any previous WASM memory
@@ -818,7 +841,11 @@ export class EmulatorAdapter {
       // 2. Direct persistence into IndexedDB ('/data/saves', 'FILE_DATA')
       await writeSavToIndexedDB(safeTitle, baseName, u8, candidatePaths);
 
-      // 3. Backup to localStorage for redundancy
+      // 3. Backup to localStorage for redundancy and immediate restore
+      this._currentSaveData = u8;
+      if (this._pendingGameConfig) {
+        this._pendingGameConfig.initialSaveData = Array.from(u8);
+      }
       try {
         let binary = '';
         for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);

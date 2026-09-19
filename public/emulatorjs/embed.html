@@ -112,7 +112,7 @@
       window.EJS_startOnLoaded = true;
       window.EJS_threads = false;
       window.EJS_pathtodata = '/emulatorjs/';
-      window.EJS_DEBUG_XX = false;
+      window.EJS_DEBUG_XX = true;
       window.EJS_noAutoFocus = true;
 
       // Disable all EmulatorJS default options & menus
@@ -127,6 +127,35 @@
         screenRecord: false, gamepad: false, cheat: false, volume: false,
         saveSavFiles: false, loadSavFiles: false, quickSave: false, quickLoad: false,
         screenshot: false, cacheManager: false
+      };
+
+      // Directly inject save data into MEMFS before ROM and core boot
+      window.EJS_onSaveDatabaseLoaded = function(fs) {
+        if (config.initialSaveData && config.initialSaveData.length > 0) {
+          try {
+            const u8 = new Uint8Array(config.initialSaveData);
+            const safeName = (window.EJS_gameName || 'game').replace(/\.gba$/i, '').trim();
+            const paths = [
+              `/data/saves/${safeName}.srm`,
+              `/data/saves/${safeName}.sav`,
+              `/data/saves/game.srm`,
+              `/data/saves/game.sav`,
+              `/${safeName}.srm`,
+              `/${safeName}.sav`
+            ];
+            for (const p of paths) {
+              try {
+                fs.writeFile(p, u8);
+              } catch (e) {}
+            }
+            try {
+              fs.syncfs(false, () => {});
+            } catch (e) {}
+            console.log('[GBA_K] Injected initial save data into MEMFS (' + u8.length + ' bytes)!');
+          } catch (e) {
+            console.error('[GBA_K] Error injecting initial save data:', e);
+          }
+        }
       };
 
       window.EJS_onGameStart = function() {

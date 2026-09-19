@@ -167,4 +167,7 @@
     if (typeof window.EJS_onSaveSave === "function") {
         window.EJS_emulator.on("saveSave", window.EJS_onSaveSave);
     }
+    if (typeof window.EJS_onSaveDatabaseLoaded === "function") {
+        window.EJS_emulator.on("saveDatabaseLoaded", window.EJS_onSaveDatabaseLoaded);
+    }
 })();
