@@ -171,7 +171,25 @@ window.addEventListener('DOMContentLoaded', () => {
   window.showAppToast = showAppToast;
 
   // --- Save / Load States Grid ---
+  // --- Save / Load States Grid ---
+  const updateBatterySaveBadge = () => {
+    const badge = document.getElementById('battery-save-badge');
+    if (!badge) return;
+    const info = gba.getBatterySaveInfo ? gba.getBatterySaveInfo() : { exists: false, sizeKb: 0 };
+    if (info && info.exists && info.sizeKb > 0) {
+      badge.textContent = `✅ Đã lưu (${info.sizeKb} KB)`;
+      badge.style.background = 'rgba(0, 242, 254, 0.15)';
+      badge.style.color = 'var(--accent-cyan)';
+    } else {
+      badge.textContent = 'Trống (chưa lưu)';
+      badge.style.background = 'rgba(255, 255, 255, 0.08)';
+      badge.style.color = 'var(--text-dim)';
+    }
+  };
+
   const renderSaveSlots = () => {
+    updateBatterySaveBadge();
+
     const grid = document.getElementById('save-slots-grid');
     if (!grid) return;
 
@@ -183,7 +201,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
       html += `
         <div class="slot-card">
-          <div style="font-weight: 700; font-size: 0.8rem; display: flex; justify-content: space-between;">
+          <div style="font-weight: 700; font-size: 0.8rem; display: flex; justify-content: space-between; align-items: center;">
             <span>Slot ${slot}</span>
             <span style="color: var(--text-dim); font-size: 0.75rem;">${timeStr}</span>
           </div>
@@ -191,6 +209,7 @@ window.addEventListener('DOMContentLoaded', () => {
           <div class="slot-actions">
             <button class="btn-slot btn-slot-save" data-slot="${slot}">Lưu</button>
             <button class="btn-slot btn-slot-load" data-slot="${slot}" ${!info ? 'disabled style="opacity:0.4;"' : ''}>Tải</button>
+            <button class="btn-slot btn-slot-delete btn-danger" data-slot="${slot}" ${!info ? 'disabled style="opacity:0.4;"' : ''} title="Xoá State Slot ${slot}">🗑️</button>
           </div>
         </div>
       `;
@@ -250,9 +269,41 @@ window.addEventListener('DOMContentLoaded', () => {
         }
       });
     });
+
+    grid.querySelectorAll('.btn-slot-delete').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const slot = parseInt(btn.getAttribute('data-slot'), 10);
+        if (!confirm(`Bạn có chắc chắn muốn xoá Save State Slot ${slot}?`)) return;
+        try {
+          const ok = await gba.deleteState(slot);
+          if (ok) {
+            showAppToast(`🗑️ Đã xoá State Slot ${slot}!`);
+          } else {
+            showAppToast(`⚠️ Không có dữ liệu để xoá ở Slot ${slot}!`);
+          }
+        } catch (e) {
+          showAppToast(`❌ Lỗi xoá State Slot ${slot}: ${e.message}`);
+        } finally {
+          renderSaveSlots();
+        }
+      });
+    });
   };
 
-  // Battery Save .sav Export & Import
+  // Clear all states button
+  document.getElementById('btn-clear-all-states')?.addEventListener('click', async () => {
+    if (!confirm('Bạn có chắc chắn muốn xoá TOÀN BỘ 6 Save State của game này không? Hành động này không thể hoàn tác!')) return;
+    try {
+      await gba.deleteAllStates();
+      showAppToast('🗑️ Đã xoá toàn bộ Save State!');
+    } catch (e) {
+      showAppToast('❌ Lỗi xoá toàn bộ State: ' + e.message);
+    } finally {
+      renderSaveSlots();
+    }
+  });
+
+  // Battery Save .sav Export & Import & Delete
   document.getElementById('btn-export-sav')?.addEventListener('click', () => {
     gba.exportSavFile();
   });
@@ -269,22 +320,40 @@ window.addEventListener('DOMContentLoaded', () => {
         gba.importSavFile(e.target.result, file.name);
         closeAllModals();
         savFileInput.value = '';
+        updateBatterySaveBadge();
       };
       reader.readAsArrayBuffer(file);
     }
   });
 
-  // Backup & Restore All Save States + Cheats
+  document.getElementById('btn-delete-sav')?.addEventListener('click', async () => {
+    if (!confirm('Bạn có chắc chắn muốn xoá dữ liệu pin lưu (.SAV) trong game không?\nTiến trình chơi (Start ➔ Save) sẽ bị xoá và trở về trạng thái mới!')) return;
+    try {
+      await gba.clearBatterySave();
+      showAppToast('🗑️ Đã xoá dữ liệu pin lưu (.SAV)!');
+    } catch (e) {
+      showAppToast('❌ Lỗi xoá .SAV: ' + e.message);
+    } finally {
+      renderSaveSlots();
+    }
+  });
+
+  // Backup & Restore All Save States + Battery Save + Cheats
   document.getElementById('btn-backup-all')?.addEventListener('click', async () => {
     try {
       const romTitle = gba.romTitle || '';
-      const backup = await saveStateManager.exportBackup(romTitle);
+      let batteryBuf = null;
+      if (gba.getBatterySaveBuffer) {
+        batteryBuf = await gba.getBatterySaveBuffer();
+      }
+      const backup = await saveStateManager.exportBackup(romTitle, batteryBuf);
       const jsonStr = JSON.stringify(backup, null, 2);
       const dateStr = new Date().toISOString().slice(0, 10);
       const fileName = `GBA_K_Backup_${romTitle || 'all'}_${dateStr}.json`;
       const ok = downloadFile(fileName, new TextEncoder().encode(jsonStr), 'application/json');
       if (ok) {
-        showAppToast(`📦 Đã sao lưu ${backup.states.length} slot vào file ${fileName}!`);
+        const savNote = backup.batterySave ? ' + File .SAV' : '';
+        showAppToast(`📦 Đã sao lưu ${backup.states.length} slot${savNote} vào ${fileName}!`);
       }
     } catch (e) {
       console.error('Backup error:', e);
@@ -303,16 +372,24 @@ window.addEventListener('DOMContentLoaded', () => {
       const reader = new FileReader();
       reader.onload = async (e) => {
         try {
-          const count = await saveStateManager.importBackup(e.target.result);
-          if (count > 0) {
-            showAppToast(`📥 Đã khôi phục thành công ${count} Save State!`);
+          const res = await saveStateManager.importBackup(e.target.result);
+          const details = [];
+          if (res.count > 0) details.push(`${res.count} Save State`);
+          if (res.batterySave) {
+            await gba.importSavFile(res.batterySave);
+            details.push('File .SAV');
+          }
+          if (details.length > 0) {
+            showAppToast(`📥 Đã khôi phục thành công: ${details.join(', ')}!`);
             renderSaveSlots();
             renderCheatsList();
           } else {
-            showAppToast('⚠️ Không tìm thấy Save State nào trong file!');
+            showAppToast('⚠️ Không tìm thấy dữ liệu nào trong file sao lưu!');
           }
         } catch (err) {
-          showAppToast('❌ File sao lưu không hợp lệ!');
+          showAppToast('❌ File sao lưu không hợp lệ: ' + err.message);
+        } finally {
+          backupFileInput.value = '';
         }
       };
       reader.readAsText(file);

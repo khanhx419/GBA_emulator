@@ -337,6 +337,14 @@ export class GBA {
     return saveStateManager.getStateInfo(this.romTitle, slot);
   }
 
+  async deleteState(slot = 1) {
+    return await saveStateManager.deleteState(this.romTitle, slot);
+  }
+
+  async deleteAllStates() {
+    return await saveStateManager.deleteAllStates(this.romTitle);
+  }
+
   // Export Battery Save (.sav)
   exportSavFile() {
     if (!this.romLoaded || !this.core.mmu.save) {
@@ -350,6 +358,33 @@ export class GBA {
       window.showAppToast(`📤 Đã xuất file ${fileName} thành công!`);
     }
     return ok;
+  }
+
+  async getBatterySaveBuffer() {
+    if (!this.romLoaded || !this.core.mmu.save) return null;
+    return new Uint8Array(this.core.mmu.save.buffer);
+  }
+
+  getBatterySaveInfo() {
+    if (this.core?.mmu?.save?.buffer) {
+      const len = this.core.mmu.save.buffer.byteLength;
+      return { exists: true, size: len, sizeKb: Math.round(len / 1024) };
+    }
+    return { exists: false, size: 0, sizeKb: 0 };
+  }
+
+  async clearBatterySave() {
+    if (this.core?.mmu?.save) {
+      new Uint8Array(this.core.mmu.save.buffer).fill(0xFF);
+      if (typeof this.core.storeSavedata === 'function') {
+        this.core.storeSavedata();
+      }
+    }
+    try {
+      localStorage.removeItem(this.core.SYS_ID + '.' + this.core.mmu.cart.code);
+    } catch (e) {}
+    this.reset();
+    return true;
   }
 
   importSavFile(arrayBuffer) {

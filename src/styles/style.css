@@ -948,6 +948,32 @@ html, body {
   color: #000;
 }
 
+.btn-slot-delete {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #f87171;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+}
+
+.btn-slot-delete:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.4);
+  color: #fff;
+}
+
+.btn-danger {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border: 1px solid rgba(239, 68, 68, 0.4) !important;
+  color: #fca5a5 !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.35) !important;
+  color: #fff !important;
+}
+
 /* Setting form */
 .setting-group {
   display: flex;

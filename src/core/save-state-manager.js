@@ -213,16 +213,55 @@ export class SaveStateManager {
     return null;
   }
 
-  async exportBackup(romTitle) {
+  async deleteState(romTitle, slot) {
+    await this._initPromise;
+    const key = this._getKey(romTitle, slot);
+    this._metaCache.delete(key);
+
+    if (this.db) {
+      await new Promise((resolve) => {
+        try {
+          const tx = this.db.transaction('states', 'readwrite');
+          const store = tx.objectStore('states');
+          const req = store.delete(key);
+          req.onsuccess = () => resolve(true);
+          req.onerror = () => resolve(false);
+        } catch (e) {
+          resolve(false);
+        }
+      });
+    }
+
+    try {
+      localStorage.removeItem(`myboy_savestate_${romTitle}_slot${slot}`);
+    } catch (e) {}
+
+    return true;
+  }
+
+  async deleteAllStates(romTitle) {
+    await this._initPromise;
+    for (let slot = 1; slot <= 10; slot++) {
+      await this.deleteState(romTitle, slot);
+    }
+    return true;
+  }
+
+  async exportBackup(romTitle, batterySaveU8 = null) {
     await this._initPromise;
     const backup = {
       app: 'GBA_K',
-      version: 1,
+      version: 2,
       timestamp: Date.now(),
       romTitle: romTitle || 'default',
       states: [],
-      cheats: null
+      cheats: null,
+      batterySaveBase64: null
     };
+
+    if (batterySaveU8 && batterySaveU8.length > 0) {
+      backup.batterySaveBase64 = this._uint8ToBase64(batterySaveU8);
+    }
 
     // 1. Collect states from IndexedDB
     if (this.db) {
@@ -235,7 +274,8 @@ export class SaveStateManager {
             const cursor = e.target.result;
             if (cursor) {
               const val = cursor.value;
-              if (!romTitle || val.romTitle === romTitle || val.key.includes(romTitle)) {
+              const safeTitle = (romTitle || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
+              if (!romTitle || val.romTitle === romTitle || val.key.includes(safeTitle) || val.key.includes(romTitle)) {
                 backup.states.push({
                   key: val.key,
                   romTitle: val.romTitle,
@@ -269,25 +309,38 @@ export class SaveStateManager {
   async importBackup(backupData) {
     await this._initPromise;
     const data = typeof backupData === 'string' ? JSON.parse(backupData) : backupData;
-    if (!data || !Array.isArray(data.states)) return 0;
+    if (!data) return { count: 0, batterySave: null };
 
     let importedCount = 0;
-    for (const item of data.states) {
-      if (item.stateBase64) {
-        const u8 = this._base64ToUint8(item.stateBase64);
-        await this.saveState(item.romTitle || data.romTitle, item.slot, u8, item.screenshot);
-        importedCount++;
+    if (Array.isArray(data.states)) {
+      for (const item of data.states) {
+        if (item.stateBase64) {
+          const u8 = this._base64ToUint8(item.stateBase64);
+          await this.saveState(item.romTitle || data.romTitle, item.slot, u8, item.screenshot);
+          importedCount++;
+        }
       }
     }
 
-    if (data.cheats && (data.romTitle || romTitle)) {
+    if (data.cheats && (data.romTitle || data.romTitle)) {
       try {
         const key = 'myboy_cheats_' + (data.romTitle || 'default');
         localStorage.setItem(key, typeof data.cheats === 'string' ? data.cheats : JSON.stringify(data.cheats));
       } catch (e) {}
     }
 
-    return importedCount;
+    let batterySave = null;
+    if (data.batterySaveBase64) {
+      try {
+        batterySave = this._base64ToUint8(data.batterySaveBase64);
+      } catch (e) {}
+    }
+
+    return {
+      count: importedCount,
+      batterySave,
+      romTitle: data.romTitle || 'game'
+    };
   }
 
   _uint8ToBase64(u8) {

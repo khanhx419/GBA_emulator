@@ -455,6 +455,14 @@ export class EmulatorAdapter {
     return saveStateManager.getStateInfo(this.romTitle, slot);
   }
 
+  async deleteState(slot = 1) {
+    return await saveStateManager.deleteState(this.romTitle, slot);
+  }
+
+  async deleteAllStates() {
+    return await saveStateManager.deleteAllStates(this.romTitle);
+  }
+
   // ===== MEMORY ACCESS FOR SCANNER =====
 
   getMemorySnapshot() {
@@ -871,6 +879,148 @@ export class EmulatorAdapter {
       }
       return false;
     }
+  }
+
+  async getBatterySaveBuffer() {
+    const gm = this._gameManager;
+    let saveData = null;
+    if (gm && typeof gm.getSaveFile === 'function') {
+      try { saveData = gm.getSaveFile(false); } catch (e) {}
+    }
+    const savePath = gm?.getSaveFilePath ? gm.getSaveFilePath() : null;
+    if (!saveData && savePath && gm?.FS) {
+      try {
+        if (gm.FS.analyzePath(savePath).exists) {
+          saveData = gm.FS.readFile(savePath);
+        }
+      } catch (e) {}
+    }
+    const safeTitle = (this.romTitle || 'game').trim();
+    const baseName = (this.romName || safeTitle).replace(/\.[^/.]+$/, '').trim();
+    const candidates = [
+      savePath,
+      `/data/saves/${safeTitle}.srm`,
+      `/data/saves/${safeTitle}.sav`,
+      `/data/saves/${baseName}.srm`,
+      `/data/saves/${baseName}.sav`,
+      `/data/saves/game.srm`,
+      `/data/saves/game.sav`,
+      `/${safeTitle}.srm`,
+      `/${safeTitle}.sav`
+    ].filter(Boolean);
+
+    if (!saveData && gm?.FS) {
+      for (const p of candidates) {
+        try {
+          if (gm.FS.analyzePath(p).exists) {
+            saveData = gm.FS.readFile(p);
+            if (saveData && saveData.length > 0) break;
+          }
+        } catch (e) {}
+      }
+    }
+    if (!saveData || saveData.length === 0) {
+      const idb = await readSavFromIndexedDB(safeTitle, baseName, candidates);
+      if (idb && idb.length > 0) saveData = idb;
+    }
+    if (!saveData || saveData.length === 0) {
+      const b64 = localStorage.getItem('gba_sav_backup_' + safeTitle);
+      if (b64) {
+        try {
+          const raw = atob(b64);
+          const u8 = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) u8[i] = raw.charCodeAt(i);
+          saveData = u8;
+        } catch (e) {}
+      }
+    }
+    return saveData;
+  }
+
+  getBatterySaveInfo() {
+    const safeTitle = (this.romTitle || 'game').trim();
+    if (this._currentSaveData && this._currentSaveData.length > 0) {
+      return {
+        exists: true,
+        size: this._currentSaveData.length,
+        sizeKb: Math.round(this._currentSaveData.length / 1024)
+      };
+    }
+    const b64 = localStorage.getItem('gba_sav_backup_' + safeTitle);
+    if (b64) {
+      const approxBytes = Math.round(b64.length * 0.75);
+      return {
+        exists: true,
+        size: approxBytes,
+        sizeKb: Math.round(approxBytes / 1024)
+      };
+    }
+    return { exists: false, size: 0, sizeKb: 0 };
+  }
+
+  async clearBatterySave() {
+    const safeTitle = (this.romTitle || 'game').trim();
+    const baseName = (this.romName || safeTitle).replace(/\.[^/.]+$/, '').trim();
+
+    this._currentSaveData = null;
+    if (this._pendingGameConfig) {
+      this._pendingGameConfig.initialSaveData = null;
+    }
+
+    // 1. Remove from localStorage
+    try {
+      localStorage.removeItem('gba_sav_backup_' + safeTitle);
+      localStorage.removeItem('gba_sav_backup_' + baseName);
+    } catch (e) {}
+
+    // 2. Remove from IndexedDB
+    if (window.indexedDB) {
+      try {
+        const req = indexedDB.open('/data/saves', 21);
+        req.onsuccess = (e) => {
+          const db = e.target.result;
+          if (db.objectStoreNames.contains('FILE_DATA')) {
+            const tx = db.transaction('FILE_DATA', 'readwrite');
+            const store = tx.objectStore('FILE_DATA');
+            const candidateKeys = [
+              `/data/saves/${safeTitle}.srm`,
+              `/data/saves/${safeTitle}.sav`,
+              `/data/saves/${baseName}.srm`,
+              `/data/saves/${baseName}.sav`,
+              `/data/saves/game.srm`,
+              `/data/saves/game.sav`,
+              `/${safeTitle}.srm`,
+              `/${safeTitle}.sav`
+            ];
+            for (const k of candidateKeys) {
+              try { store.delete(k); } catch (err) {}
+            }
+          }
+        };
+      } catch (e) {}
+    }
+
+    // 3. Remove from MEMFS in iframe
+    const gm = this._gameManager;
+    if (gm?.FS) {
+      const paths = [
+        gm.getSaveFilePath ? gm.getSaveFilePath() : null,
+        `/data/saves/${safeTitle}.srm`,
+        `/data/saves/${safeTitle}.sav`,
+        `/data/saves/${baseName}.srm`,
+        `/data/saves/${baseName}.sav`,
+        `/data/saves/game.srm`,
+        `/data/saves/game.sav`
+      ].filter(Boolean);
+      for (const p of paths) {
+        try { gm.FS.unlink(p); } catch (e) {}
+      }
+      try { gm.FS.syncfs(false, () => {}); } catch (e) {}
+    }
+
+    // 4. Clean reboot
+    this.reboot();
+    return true;
   }
 
   // ===== FREEZE LIST =====
