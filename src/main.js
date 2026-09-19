@@ -262,13 +262,15 @@ window.addEventListener('DOMContentLoaded', () => {
     savFileInput?.click();
   });
   savFileInput?.addEventListener('change', () => {
-    if (savFileInput.files.length > 0) {
+    if (savFileInput.files && savFileInput.files.length > 0) {
+      const file = savFileInput.files[0];
       const reader = new FileReader();
       reader.onload = (e) => {
-        gba.importSavFile(e.target.result);
+        gba.importSavFile(e.target.result, file.name);
         closeAllModals();
+        savFileInput.value = '';
       };
-      reader.readAsArrayBuffer(savFileInput.files[0]);
+      reader.readAsArrayBuffer(file);
     }
   });
 

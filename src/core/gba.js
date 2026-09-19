@@ -353,10 +353,28 @@ export class GBA {
   }
 
   importSavFile(arrayBuffer) {
-    if (!this.core.mmu.save) return;
-    const data = new Uint8Array(arrayBuffer);
-    const target = new Uint8Array(this.core.mmu.save.buffer);
-    const len = Math.min(data.length, target.length);
-    target.set(data.subarray(0, len));
+    if (!this.romLoaded || !this.core.mmu.save) {
+      if (window.showAppToast) window.showAppToast('⚠️ Vui lòng mở game trước khi nạp file .SAV!');
+      return false;
+    }
+    try {
+      const data = new Uint8Array(arrayBuffer);
+      const target = new Uint8Array(this.core.mmu.save.buffer);
+      const len = Math.min(data.length, target.length);
+      target.set(data.subarray(0, len));
+      if (typeof this.core.storeSavedata === 'function') {
+        this.core.storeSavedata();
+      }
+      if (window.showAppToast) {
+        window.showAppToast('📥 Đã nạp file .SAV! Đang khởi động lại...');
+      }
+      setTimeout(() => {
+        this.reset();
+      }, 500);
+      return true;
+    } catch (e) {
+      if (window.showAppToast) window.showAppToast('❌ Lỗi khi nạp file .SAV: ' + e.message);
+      return false;
+    }
   }
 }

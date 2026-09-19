@@ -89,6 +89,9 @@
             if (!cfg.includes('video_font_enable')) {
               cfg += '\nvideo_font_enable = false\nnotification_show_fast_forward = false\nvideo_message_pos_x = 2.0\nvideo_message_pos_y = 2.0\n';
             }
+            if (!cfg.includes('autosave_interval')) {
+              cfg += '\nautosave_interval = 10\n';
+            }
             return cfg;
           };
         }
@@ -135,6 +138,22 @@
           if (typeof window.EJS_emulator.toggleVirtualGamepad === 'function') {
             window.EJS_emulator.toggleVirtualGamepad(false);
           }
+          // Hook battery save file updates to guarantee permanent IndexedDB persistence
+          window.EJS_emulator.on('saveSaveFiles', function(saveData) {
+            try {
+              const gm = window.EJS_emulator?.gameManager;
+              if (gm?.FS) {
+                gm.FS.syncfs(false, () => {});
+              }
+              if (saveData && saveData.length > 0) {
+                window.parent.postMessage({
+                  type: 'EJS_BATTERY_SAVE_UPDATED',
+                  data: Array.from(saveData),
+                  romTitle: window.EJS_gameName
+                }, '*');
+              }
+            } catch (e) {}
+          });
         }
         // Ensure RetroArch config disables font / OSD notifications and enables frameskip + audio mute during fast-forward
         try {
@@ -223,8 +242,25 @@
         } else if (e.data.type === 'EJS_SET_SPEED') {
           pendingSpeed = { fastForward: e.data.fastForward, speedMultiplier: e.data.speedMultiplier };
           applySpeed(e.data.fastForward, e.data.speedMultiplier);
+        } else if (e.data.type === 'EJS_FLUSH_SAVES') {
+          try {
+            const gm = window.EJS_emulator?.gameManager;
+            if (gm && typeof gm.saveSaveFiles === 'function') {
+              gm.saveSaveFiles();
+            }
+          } catch (err) {}
         }
       });
+
+      // Background periodic save flush to IndexedDB every 8 seconds
+      setInterval(() => {
+        try {
+          const gm = window.EJS_emulator?.gameManager;
+          if (gm && typeof gm.saveSaveFiles === 'function') {
+            gm.saveSaveFiles();
+          }
+        } catch (err) {}
+      }, 8000);
 
       // Load loader script
       const script = document.createElement('script');

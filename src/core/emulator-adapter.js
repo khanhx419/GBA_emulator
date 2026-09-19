@@ -10,6 +10,7 @@
 
 import { saveStateManager } from './save-state-manager.js';
 import { downloadFile } from './download-helper.js';
+import { writeSavToIndexedDB, readSavFromIndexedDB } from './battery-save-helper.js';
 
 export class EmulatorAdapter {
   constructor(canvas) {
@@ -106,8 +107,51 @@ export class EmulatorAdapter {
         this.loadFreezeList();
 
         this._applySpeed();
+      } else if (event.data.type === 'EJS_BATTERY_SAVE_UPDATED') {
+        const u8 = new Uint8Array(event.data.data);
+        if (u8 && u8.length > 0) {
+          const gm = this._gameManager;
+          const savePath = gm?.getSaveFilePath ? gm.getSaveFilePath() : null;
+          writeSavToIndexedDB(this.romTitle, this.romName, u8, savePath ? [savePath] : []);
+          try {
+            let binary = '';
+            for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
+            localStorage.setItem('gba_sav_backup_' + (this.romTitle || 'game'), btoa(binary));
+          } catch (e) {}
+        }
       }
     });
+
+    // Auto-flush saves on tab switch or page close
+    window.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.flushBatterySave();
+      }
+    });
+    window.addEventListener('beforeunload', () => {
+      this.flushBatterySave();
+    });
+  }
+
+  flushBatterySave() {
+    try {
+      this.iframe?.contentWindow?.postMessage({ type: 'EJS_FLUSH_SAVES' }, '*');
+      const gm = this._gameManager;
+      if (gm && typeof gm.saveSaveFiles === 'function') {
+        gm.saveSaveFiles();
+      }
+    } catch (e) {}
+  }
+
+  reboot() {
+    if (!this._pendingGameConfig) return;
+    this.ejsReady = false;
+    this.running = false;
+    this.romLoaded = false;
+    this.iframe.src = 'about:blank';
+    setTimeout(() => {
+      this.iframe.src = '/emulatorjs/embed.html';
+    }, 100);
   }
 
   // ===== ROM LOADING =====
@@ -628,53 +672,81 @@ export class EmulatorAdapter {
 
   // ===== BATTERY SAVE =====
 
-  exportSavFile() {
-    const gm = this._gameManager;
-    if (!this.romLoaded || !gm) {
+  async exportSavFile() {
+    if (!this.romLoaded) {
       if (window.showAppToast) window.showAppToast('⚠️ Vui lòng mở game trước khi xuất file .SAV!');
       return false;
     }
 
     try {
+      const gm = this._gameManager;
       // 1. Force flush SRAM from core to filesystem
-      if (typeof gm.saveSaveFiles === 'function') {
-        gm.saveSaveFiles();
-      } else if (gm.functions?.saveSaveFiles) {
-        gm.functions.saveSaveFiles();
-      }
-
-      // 2. Obtain save data buffer
-      let saveData = null;
-      if (typeof gm.getSaveFile === 'function') {
-        saveData = gm.getSaveFile(false);
-      }
-
-      if (!saveData && gm.getSaveFilePath && gm.FS) {
-        const savePath = gm.getSaveFilePath();
-        if (savePath && gm.FS.analyzePath(savePath).exists) {
-          saveData = gm.FS.readFile(savePath);
+      if (gm) {
+        if (typeof gm.saveSaveFiles === 'function') {
+          gm.saveSaveFiles();
+        } else if (gm.functions?.saveSaveFiles) {
+          gm.functions.saveSaveFiles();
         }
       }
 
+      // 2. Obtain save data buffer from GameManager
+      let saveData = null;
+      if (gm && typeof gm.getSaveFile === 'function') {
+        saveData = gm.getSaveFile(false);
+      }
+
+      const savePath = gm?.getSaveFilePath ? gm.getSaveFilePath() : null;
+      if (!saveData && savePath && gm?.FS) {
+        try {
+          if (gm.FS.analyzePath(savePath).exists) {
+            saveData = gm.FS.readFile(savePath);
+          }
+        } catch (e) {}
+      }
+
       // 3. Fallback: search common save paths in Emscripten MEMFS
-      if (!saveData && gm.FS) {
-        const title = this.romTitle || 'game';
-        const candidates = [
-          `/data/saves/${title}.srm`,
-          `/data/saves/${title}.sav`,
-          `/${title}.srm`,
-          `/${title}.sav`,
-          `/data/saves/game.srm`,
-          `/data/saves/game.sav`,
-          `/game.srm`,
-          `/game.sav`
-        ];
+      const safeTitle = (this.romTitle || 'game').trim();
+      const baseName = (this.romName || safeTitle).replace(/\.[^/.]+$/, '').trim();
+      const candidates = [
+        savePath,
+        `/data/saves/${safeTitle}.srm`,
+        `/data/saves/${safeTitle}.sav`,
+        `/data/saves/${baseName}.srm`,
+        `/data/saves/${baseName}.sav`,
+        `/data/saves/game.srm`,
+        `/data/saves/game.sav`,
+        `/${safeTitle}.srm`,
+        `/${safeTitle}.sav`
+      ].filter(Boolean);
+
+      if (!saveData && gm?.FS) {
         for (const p of candidates) {
           try {
             if (gm.FS.analyzePath(p).exists) {
               saveData = gm.FS.readFile(p);
-              break;
+              if (saveData && saveData.length > 0) break;
             }
+          } catch (e) {}
+        }
+      }
+
+      // 4. Fallback: read directly from IndexedDB ('/data/saves')
+      if (!saveData || saveData.length === 0) {
+        const idbData = await readSavFromIndexedDB(safeTitle, baseName, candidates);
+        if (idbData && idbData.length > 0) {
+          saveData = idbData;
+        }
+      }
+
+      // 5. Fallback: read from localStorage backup
+      if (!saveData || saveData.length === 0) {
+        const b64 = localStorage.getItem('gba_sav_backup_' + safeTitle);
+        if (b64) {
+          try {
+            const raw = atob(b64);
+            const u8 = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) u8[i] = raw.charCodeAt(i);
+            saveData = u8;
           } catch (e) {}
         }
       }
@@ -686,7 +758,7 @@ export class EmulatorAdapter {
         return false;
       }
 
-      const fileName = `${this.romTitle || 'game'}.sav`;
+      const fileName = `${safeTitle}.sav`;
       const ok = downloadFile(fileName, saveData);
       if (ok && window.showAppToast) {
         window.showAppToast(`📤 Đã xuất file ${fileName} thành công!`);
@@ -701,46 +773,67 @@ export class EmulatorAdapter {
     }
   }
 
-  importSavFile(arrayBuffer) {
-    const gm = this._gameManager;
-    if (!gm || !gm.FS) {
+  async importSavFile(arrayBuffer, fileName = null) {
+    if (!this.romLoaded) {
       if (window.showAppToast) window.showAppToast('⚠️ Vui lòng mở game trước khi nạp file .SAV!');
       return false;
     }
+
     try {
       const u8 = arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer);
-      const savePath = gm.getSaveFilePath ? gm.getSaveFilePath() : null;
-      if (savePath) {
-        gm.FS.writeFile(savePath, u8);
+      if (!u8 || u8.length === 0) {
+        if (window.showAppToast) window.showAppToast('❌ File .SAV trống hoặc không hợp lệ!');
+        return false;
       }
-      // Also write to common candidates so RetroArch finds it
-      const title = this.romTitle || 'game';
-      const paths = [
+
+      const gm = this._gameManager;
+      const savePath = gm?.getSaveFilePath ? gm.getSaveFilePath() : null;
+      const safeTitle = (this.romTitle || 'game').trim();
+      const baseName = (fileName || this.romName || safeTitle).replace(/\.[^/.]+$/, '').trim();
+
+      const candidatePaths = [
         savePath,
-        `/data/saves/${title}.srm`,
-        `/data/saves/${title}.sav`,
-        `/${title}.srm`,
-        `/${title}.sav`
+        `/data/saves/${safeTitle}.srm`,
+        `/data/saves/${safeTitle}.sav`,
+        `/data/saves/${baseName}.srm`,
+        `/data/saves/${baseName}.sav`,
+        `/data/saves/game.srm`,
+        `/data/saves/game.sav`,
+        `/${safeTitle}.srm`,
+        `/${safeTitle}.sav`
       ].filter(Boolean);
 
-      for (const p of paths) {
+      // 1. Write to Emscripten MEMFS if active
+      if (gm?.FS) {
+        for (const p of candidatePaths) {
+          try {
+            gm.FS.writeFile(p, u8);
+          } catch (e) {}
+        }
         try {
-          gm.FS.writeFile(p, u8);
+          gm.FS.syncfs(false, () => {});
         } catch (e) {}
       }
 
-      if (typeof gm.loadSaveFiles === 'function') {
-        gm.loadSaveFiles();
-      } else if (gm.functions?.loadSaveFiles) {
-        gm.functions.loadSaveFiles();
-      }
+      // 2. Direct persistence into IndexedDB ('/data/saves', 'FILE_DATA')
+      await writeSavToIndexedDB(safeTitle, baseName, u8, candidatePaths);
+
+      // 3. Backup to localStorage for redundancy
+      try {
+        let binary = '';
+        for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
+        localStorage.setItem('gba_sav_backup_' + safeTitle, btoa(binary));
+      } catch (e) {}
 
       if (window.showAppToast) {
-        window.showAppToast('📥 Đã nạp file .SAV! Đang khởi động lại để nhận file lưu...');
+        window.showAppToast('📥 Đã nạp file .SAV! Đang khởi động lại để nhận dữ liệu lưu...');
       }
 
+      // 4. CRITICAL: Clean iframe reboot!
+      // This prevents RetroArch's exit/restart hook from dumping stale in-memory RAM back to disk,
+      // and ensures the new instance cleanly mounts IndexedDB and loads the imported save at boot!
       setTimeout(() => {
-        this.reset();
+        this.reboot();
       }, 500);
 
       return true;
