@@ -41,26 +41,22 @@ export class GBACheats {
     for (const item of this.cheats) {
       if (!item.enabled) continue;
 
-      const lines = item.code.split('\n');
-      for (let line of lines) {
-        line = line.trim().replace(/\s+/g, '');
-        if (!line) continue;
+      const lines = item.code.split(/[\r\n]+/);
+      for (const rawLine of lines) {
+        if (!rawLine.trim()) continue;
+        const hexOnly = rawLine.trim().toUpperCase().replace(/[^0-9A-F]/g, '');
 
-        // CodeBreaker / GameShark 12-char or Raw 8+8 hex format:
-        // Format: AAAAAAAA VVVV or AAAAAAAA VVVVVVVV
-        if (line.length === 12) {
-          // Format 1: 82003884 03E7 (Address + 16-bit val)
-          const addrHex = line.substring(0, 8);
-          const valHex = line.substring(8, 12);
+        if (hexOnly.length === 12) {
+          const addrHex = hexOnly.substring(0, 8);
+          const valHex = hexOnly.substring(8, 12);
           const addr = parseInt(addrHex, 16);
           const val = parseInt(valHex, 16);
           if (!isNaN(addr) && !isNaN(val)) {
-            // Apply byte or halfword based on CodeBreaker prefix
-            if (addrHex.startsWith('82')) {
+            if (addrHex.startsWith('82') || addrHex.startsWith('02')) {
               mmu.write16(0x02000000 | (addr & 0x00FFFFFF), val);
             } else if (addrHex.startsWith('32')) {
               mmu.write8(0x02000000 | (addr & 0x00FFFFFF), val & 0xFF);
-            } else if (addrHex.startsWith('83')) {
+            } else if (addrHex.startsWith('83') || addrHex.startsWith('03')) {
               mmu.write16(0x03000000 | (addr & 0x00FFFFFF), val);
             } else if (addrHex.startsWith('33')) {
               mmu.write8(0x03000000 | (addr & 0x00FFFFFF), val & 0xFF);
@@ -68,10 +64,20 @@ export class GBACheats {
               mmu.write16(addr, val);
             }
           }
-        } else if (line.length === 16) {
-          // 32-bit Raw Cheat: 02003884 000003E7
-          const addrHex = line.substring(0, 8);
-          const valHex = line.substring(8, 16);
+        } else if (hexOnly.length === 10) {
+          const addrHex = hexOnly.substring(0, 8);
+          const val = parseInt(hexOnly.substring(8, 10), 16);
+          const addr = parseInt(addrHex, 16);
+          if (!isNaN(addr) && !isNaN(val)) {
+            if (addrHex.startsWith('03') || addrHex.startsWith('33')) {
+              mmu.write8(0x03000000 | (addr & 0x00FFFFFF), val & 0xFF);
+            } else {
+              mmu.write8(0x02000000 | (addr & 0x00FFFFFF), val & 0xFF);
+            }
+          }
+        } else if (hexOnly.length === 16) {
+          const addrHex = hexOnly.substring(0, 8);
+          const valHex = hexOnly.substring(8, 16);
           const addr = parseInt(addrHex, 16);
           const val = parseInt(valHex, 16);
           if (!isNaN(addr) && !isNaN(val)) {

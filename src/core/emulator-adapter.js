@@ -589,22 +589,74 @@ export class EmulatorAdapter {
     };
   }
 
+  normalizeGbaCheatLine(rawLine) {
+    if (!rawLine) return null;
+    const clean = rawLine.trim().toUpperCase();
+    const hexOnly = clean.replace(/[^0-9A-F]/g, '');
+
+    // Case 1: 12 hex digits (8 addr + 4 val) e.g. 82003884 03E7, 02003884:03E7, 8200388403E7
+    if (hexOnly.length === 12) {
+      let addr = hexOnly.substring(0, 8);
+      const val = hexOnly.substring(8, 12);
+      // If raw RAM address (02xxxxxx or 03xxxxxx), convert to CodeBreaker write so mGBA accepts it
+      if (addr.startsWith('02')) {
+        addr = '82' + addr.substring(2);
+      } else if (addr.startsWith('03')) {
+        addr = '83' + addr.substring(2);
+      }
+      return `${addr} ${val}`; // Exactly 13 characters required by mGBA
+    }
+
+    // Case 2: 10 hex digits (8 addr + 2 val byte write) e.g. 02025840 44, 32025840 44
+    if (hexOnly.length === 10) {
+      let addr = hexOnly.substring(0, 8);
+      const val = hexOnly.substring(8, 10).padStart(4, '0');
+      if (addr.startsWith('02')) {
+        addr = '32' + addr.substring(2);
+      } else if (addr.startsWith('03')) {
+        addr = '33' + addr.substring(2);
+      } else if (!addr.startsWith('32') && !addr.startsWith('33')) {
+        addr = '32' + addr.substring(2);
+      }
+      return `${addr} ${val}`; // Exactly 13 characters required by mGBA
+    }
+
+    // Case 3: 16 hex digits (8 + 8) GameShark v3 / Action Replay MAX
+    if (hexOnly.length === 16) {
+      const part1 = hexOnly.substring(0, 8);
+      const part2 = hexOnly.substring(8, 16);
+      return `${part1} ${part2}`; // Exactly 17 characters required by mGBA
+    }
+
+    // Fallback: If it's already separated by space or colon, ensure standard single space
+    const parts = clean.split(/[\s:+]+/).filter(Boolean);
+    if (parts.length === 2) {
+      let [p1, p2] = parts;
+      if (p1.length === 8 && p2.length <= 4) {
+        p2 = p2.padStart(4, '0');
+        if (p1.startsWith('02')) p1 = '82' + p1.substring(2);
+        if (p1.startsWith('03')) p1 = '83' + p1.substring(2);
+        return `${p1} ${p2}`;
+      }
+      if (p1.length === 8 && p2.length === 8) {
+        return `${p1} ${p2}`;
+      }
+    }
+
+    return clean;
+  }
+
   _applyCheatsToEJS() {
-    const gm = this._gameManager;
-    if (!gm || !gm.setCheat) return;
+    const codes = [];
 
-    if (gm.resetCheat) gm.resetCheat();
-
-    let idx = 0;
     // 1. Regular Cheats
     for (const cheat of this._cheats) {
       if (!cheat.enabled) continue;
       const lines = cheat.code.trim().split(/[\n\r]+/);
       for (const line of lines) {
-        const clean = line.replace(/\s+/g, ' ').trim();
-        if (clean) {
-          gm.setCheat(idx, 1, clean);
-          idx++;
+        const normalized = this.normalizeGbaCheatLine(line);
+        if (normalized) {
+          codes.push(normalized);
         }
       }
     }
@@ -613,8 +665,28 @@ export class EmulatorAdapter {
     for (const f of this.freezeList) {
       const code = this._formatFreezeAsCheat(f.address, f.value, f.dataType);
       if (code) {
-        gm.setCheat(idx, 1, code);
-        idx++;
+        codes.push(code);
+      }
+    }
+
+    // 3. Post to iframe via postMessage for cross-frame reliability
+    try {
+      this.iframe?.contentWindow?.postMessage({
+        type: 'EJS_SET_CHEATS',
+        codes
+      }, '*');
+    } catch (e) {}
+
+    // 4. Also call directly on gameManager if accessible
+    const gm = this._gameManager;
+    if (gm && typeof gm.setCheat === 'function') {
+      try {
+        if (typeof gm.resetCheat === 'function') gm.resetCheat();
+        for (let idx = 0; idx < codes.length; idx++) {
+          gm.setCheat(idx, 1, codes[idx]);
+        }
+      } catch (e) {
+        console.warn('[GBA_K] Direct setCheat error:', e);
       }
     }
   }

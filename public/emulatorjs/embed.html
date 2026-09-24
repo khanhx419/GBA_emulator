@@ -278,6 +278,20 @@
               gm.saveSaveFiles();
             }
           } catch (err) {}
+        } else if (e.data.type === 'EJS_SET_CHEATS') {
+          try {
+            const gm = window.EJS_emulator?.gameManager;
+            if (gm && typeof gm.setCheat === 'function') {
+              if (typeof gm.resetCheat === 'function') gm.resetCheat();
+              const codes = e.data.codes || [];
+              for (let i = 0; i < codes.length; i++) {
+                gm.setCheat(i, 1, codes[i]);
+              }
+              console.log('[GBA_K] Applied ' + codes.length + ' cheat line(s) to mGBA core.');
+            }
+          } catch (err) {
+            console.warn('[GBA_K] Apply cheats error in iframe:', err);
+          }
         }
       });
 
