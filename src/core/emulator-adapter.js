@@ -539,6 +539,9 @@ export class EmulatorAdapter {
 
       if (targetOffset !== -1) {
         val = Number(val);
+        if (val > 65535 && type !== 'u32') {
+          type = 'u32';
+        }
         if (type === 'u8') {
           state[targetOffset] = val & 0xFF;
         } else if (type === 'u16') {
@@ -663,9 +666,11 @@ export class EmulatorAdapter {
 
     // 2. Active Freezes as hardware cheats
     for (const f of this.freezeList) {
-      const code = this._formatFreezeAsCheat(f.address, f.value, f.dataType);
-      if (code) {
-        codes.push(code);
+      const codeOrArr = this._formatFreezeAsCheat(f.address, f.value, f.dataType);
+      if (Array.isArray(codeOrArr)) {
+        codes.push(...codeOrArr);
+      } else if (codeOrArr) {
+        codes.push(codeOrArr);
       }
     }
 
@@ -693,18 +698,24 @@ export class EmulatorAdapter {
 
   _formatFreezeAsCheat(addr, val, type = 'u16') {
     val = Number(val);
-    if (addr >= 0x02000000 && addr < 0x02040000) {
-      const offset = (addr - 0x02000000).toString(16).padStart(6, '0').toUpperCase();
-      if (type === 'u8') return `3200${offset.slice(2)} 00${(val & 0xFF).toString(16).padStart(2, '0').toUpperCase()}`;
-      if (type === 'u32') return `0400${offset.slice(2)} ${(val >>> 0).toString(16).padStart(8, '0').toUpperCase()}`;
-      return `8200${offset.slice(2)} ${(val & 0xFFFF).toString(16).padStart(4, '0').toUpperCase()}`;
-    } else if (addr >= 0x03000000 && addr < 0x03008000) {
-      const offset = (addr - 0x03000000).toString(16).padStart(6, '0').toUpperCase();
-      if (type === 'u8') return `3300${offset.slice(2)} 00${(val & 0xFF).toString(16).padStart(2, '0').toUpperCase()}`;
-      if (type === 'u32') return `0400${offset.slice(2)} ${(val >>> 0).toString(16).padStart(8, '0').toUpperCase()}`;
-      return `8300${offset.slice(2)} ${(val & 0xFFFF).toString(16).padStart(4, '0').toUpperCase()}`;
+    const isEwram = (addr >= 0x02000000 && addr < 0x02040000);
+    const isIwram = (addr >= 0x03000000 && addr < 0x03008000);
+    if (!isEwram && !isIwram) return null;
+
+    const prefix = isEwram ? '82' : '83';
+    const bytePrefix = isEwram ? '32' : '33';
+    const off = (addr & 0x00FFFFFF).toString(16).padStart(6, '0').toUpperCase();
+
+    if (type === 'u8') {
+      return `${bytePrefix}${off} 00${(val & 0xFF).toString(16).padStart(2, '0').toUpperCase()}`;
     }
-    return null;
+    if (type === 'u32' || val > 65535) {
+      const off2 = ((addr + 2) & 0x00FFFFFF).toString(16).padStart(6, '0').toUpperCase();
+      const low16 = (val & 0xFFFF).toString(16).padStart(4, '0').toUpperCase();
+      const high16 = ((val >>> 16) & 0xFFFF).toString(16).padStart(4, '0').toUpperCase();
+      return [`${prefix}${off} ${low16}`, `${prefix}${off2} ${high16}`];
+    }
+    return `${prefix}${off} ${(val & 0xFFFF).toString(16).padStart(4, '0').toUpperCase()}`;
   }
 
   _saveCheatsToStorage() {

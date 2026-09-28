@@ -563,8 +563,10 @@ window.addEventListener('DOMContentLoaded', () => {
         const currentVal = scanner.readValue(addr);
         const newVal = prompt(`Nhập giá trị mới cho địa chỉ 0x${addr.toString(16).toUpperCase()}:`, currentVal);
         if (newVal !== null && newVal !== '') {
-          scanner.writeValue(addr, Number(newVal));
-          showAppToast(`✏️ Đã sửa giá trị 0x${addr.toString(16).toUpperCase()} thành ${newVal}!`);
+          const num = Number(newVal);
+          const type = num > 65535 ? 'u32' : scanner.valueType;
+          scanner.writeValue(addr, num, type);
+          showAppToast(`✏️ Đã sửa giá trị 0x${addr.toString(16).toUpperCase()} thành ${num} (${type.toUpperCase()})!`);
           btnScannerNext.click(); // refresh list
         }
       });
@@ -576,9 +578,11 @@ window.addEventListener('DOMContentLoaded', () => {
         const currentVal = scanner.readValue(addr);
         const freezeVal = prompt(`Khóa giá trị tại 0x${addr.toString(16).toUpperCase()} ở mức:`, currentVal);
         if (freezeVal !== null && freezeVal !== '') {
-          gba.addFreeze(addr, Number(freezeVal), scanner.valueType);
+          const num = Number(freezeVal);
+          const type = num > 65535 ? 'u32' : scanner.valueType;
+          gba.addFreeze(addr, num, type);
           renderScannerFrozenList();
-          showAppToast(`❄️ Đã khóa địa chỉ 0x${addr.toString(16).toUpperCase()} = ${freezeVal}!`);
+          showAppToast(`❄️ Đã khóa địa chỉ 0x${addr.toString(16).toUpperCase()} = ${num} (${type.toUpperCase()})!`);
         }
       });
     });
@@ -604,8 +608,10 @@ window.addEventListener('DOMContentLoaded', () => {
     if (scanner.results.length === 0) return;
     const newVal = prompt(`Nhập giá trị mới để áp dụng cho tất cả ${scanner.results.length} địa chỉ:`);
     if (newVal !== null && newVal.trim() !== '') {
-      scanner.editAll(Number(newVal));
-      showAppToast(`✏️ Đã sửa ${scanner.results.length} địa chỉ thành ${newVal}!`);
+      const num = Number(newVal);
+      const type = num > 65535 ? 'u32' : scanner.valueType;
+      scanner.editAll(num, type);
+      showAppToast(`✏️ Đã sửa ${scanner.results.length} địa chỉ thành ${num} (${type.toUpperCase()})!`);
       updateScannerUI();
     }
   });
@@ -685,15 +691,32 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   };
 
+  scannerValInput?.addEventListener('input', () => {
+    const raw = scannerValInput.value.trim();
+    if (raw !== '') {
+      const num = Number(raw);
+      if (!isNaN(num) && num > 65535 && scannerTypeSelect && scannerTypeSelect.value !== 'u32') {
+        scannerTypeSelect.value = 'u32';
+        scanner.setValueType('u32');
+        showAppToast('💡 Giá trị > 65.535: Đã tự động chuyển sang 32-bit (0 - 4.2 tỷ)!');
+      }
+    }
+  });
+
   btnScannerFirst?.addEventListener('click', () => {
     const val = scannerValInput.value.trim();
     if (scanner.compareType === 'exact' && val === '') {
       alert('Vui lòng nhập giá trị cần tìm!');
       return;
     }
+    const num = val !== '' ? Number(val) : null;
+    if (num !== null && num > 65535 && scannerTypeSelect.value !== 'u32') {
+      scannerTypeSelect.value = 'u32';
+    }
     scanner.setValueType(scannerTypeSelect.value);
-    const results = scanner.searchFirst(val !== '' ? Number(val) : null);
-    scannerStatus.textContent = `Tìm thấy ${results.length} ô nhớ (chế độ ${scanner.compareType}). Hãy thay đổi thông số trong game rồi bấm "Lọc Tiếp".`;
+    const results = scanner.searchFirst(num);
+    const typeLabel = scannerTypeSelect.value.toUpperCase();
+    scannerStatus.textContent = `Tìm thấy ${results.length} ô nhớ (kiểu ${typeLabel}, so sánh ${scanner.compareType}). Hãy thay đổi thông số trong game rồi bấm "Lọc Tiếp".`;
     updateScannerUI();
   });
 
@@ -703,7 +726,12 @@ window.addEventListener('DOMContentLoaded', () => {
       alert('Vui lòng nhập giá trị mới để lọc tiếp!');
       return;
     }
-    const results = scanner.searchNext(val !== '' ? Number(val) : null);
+    const num = val !== '' ? Number(val) : null;
+    if (num !== null && num > 65535 && scannerTypeSelect.value !== 'u32') {
+      scannerTypeSelect.value = 'u32';
+      scanner.setValueType('u32');
+    }
+    const results = scanner.searchNext(num);
     scannerStatus.textContent = `Còn lại ${results.length} ô nhớ phù hợp điều kiện.`;
     updateScannerUI();
   });

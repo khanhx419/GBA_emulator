@@ -93,6 +93,9 @@ export class GBAMemoryScanner {
   // Live single-address write
   writeValue(addr, val, type = this.valueType) {
     val = Number(val);
+    if (val > 65535 && type !== 'u32') {
+      type = 'u32';
+    }
     if (typeof this.gba.writeMemory === 'function') {
       return this.gba.writeMemory(addr, val, type);
     }
@@ -120,7 +123,8 @@ export class GBAMemoryScanner {
 
     const numVal = targetVal !== '' && targetVal !== null && !isNaN(Number(targetVal)) ? Number(targetVal) : null;
     const matches = [];
-    const step = this.valueType === 'u8' ? 1 : (this.valueType === 'u16' ? 2 : 4);
+    // For u32, use step = 2 so 2-byte aligned 32-bit numbers (common in packed GBA structs) are not missed
+    const step = this.valueType === 'u8' ? 1 : 2;
     const mode = this.compareType;
 
     // Scan EWRAM (0x02000000, 256KB)
@@ -227,10 +231,13 @@ export class GBAMemoryScanner {
   }
 
   // Batch edit all found results
-  editAll(newVal) {
+  editAll(newVal, type = this.valueType) {
     newVal = Number(newVal);
+    if (newVal > 65535 && type !== 'u32') {
+      type = 'u32';
+    }
     for (const item of this.results) {
-      this.writeValue(item.address, newVal, this.valueType);
+      this.writeValue(item.address, newVal, type);
       item.value = newVal;
     }
   }
@@ -239,36 +246,43 @@ export class GBAMemoryScanner {
   freezeAll(freezeVal = null) {
     for (const item of this.results) {
       const val = freezeVal !== null ? Number(freezeVal) : item.value;
-      this.gba.addFreeze(item.address, val, this.valueType);
+      const type = val > 65535 ? 'u32' : this.valueType;
+      this.gba.addFreeze(item.address, val, type);
     }
   }
 
   // Generate GBA CodeBreaker / GameShark code for a given address
   generateCheatCode(addr, val, type = this.valueType) {
     val = Number(val);
-    const hexVal = type === 'u8'
-      ? (val & 0xFF).toString(16).padStart(2, '0').toUpperCase()
-      : (type === 'u16'
-        ? (val & 0xFFFF).toString(16).padStart(4, '0').toUpperCase()
-        : (val >>> 0).toString(16).padStart(8, '0').toUpperCase());
-
-    if (addr >= 0x02000000 && addr < 0x02040000) {
-      const offset = (addr - 0x02000000).toString(16).padStart(6, '0').toUpperCase();
-      if (type === 'u8') return `3200${offset.slice(2)} 00${hexVal}`;
-      if (type === 'u32') return `0400${offset.slice(2)} ${hexVal}`;
-      return `8200${offset.slice(2)} ${hexVal}`;
-    } else if (addr >= 0x03000000 && addr < 0x03008000) {
-      const offset = (addr - 0x03000000).toString(16).padStart(6, '0').toUpperCase();
-      if (type === 'u8') return `3300${offset.slice(2)} 00${hexVal}`;
-      if (type === 'u32') return `0400${offset.slice(2)} ${hexVal}`;
-      return `8300${offset.slice(2)} ${hexVal}`;
+    if (val > 65535 && type !== 'u32') {
+      type = 'u32';
     }
-    return null;
+    const isEwram = (addr >= 0x02000000 && addr < 0x02040000);
+    const isIwram = (addr >= 0x03000000 && addr < 0x03008000);
+    if (!isEwram && !isIwram) return null;
+
+    const prefix = isEwram ? '82' : '83';
+    const bytePrefix = isEwram ? '32' : '33';
+    const off = (addr & 0x00FFFFFF).toString(16).padStart(6, '0').toUpperCase();
+
+    if (type === 'u8') {
+      const hexVal = (val & 0xFF).toString(16).padStart(2, '0').toUpperCase();
+      return `${bytePrefix}${off} 00${hexVal}`;
+    }
+    if (type === 'u32') {
+      const off2 = ((addr + 2) & 0x00FFFFFF).toString(16).padStart(6, '0').toUpperCase();
+      const low16 = (val & 0xFFFF).toString(16).padStart(4, '0').toUpperCase();
+      const high16 = ((val >>> 16) & 0xFFFF).toString(16).padStart(4, '0').toUpperCase();
+      return `${prefix}${off} ${low16}\n${prefix}${off2} ${high16}`;
+    }
+    const hexVal = (val & 0xFFFF).toString(16).padStart(4, '0').toUpperCase();
+    return `${prefix}${off} ${hexVal}`;
   }
 
   // Create a cheat and add it directly to Cheat Manager
   createCheat(addr, val, name = null) {
-    const code = this.generateCheatCode(addr, val, this.valueType);
+    const type = Number(val) > 65535 ? 'u32' : this.valueType;
+    const code = this.generateCheatCode(addr, val, type);
     if (!code) return false;
     const cheatName = name || `Cheat 0x${addr.toString(16).toUpperCase()}`;
     if (this.gba.cheats && this.gba.cheats.addCheat) {
