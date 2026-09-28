@@ -66,6 +66,20 @@
             <input type="range" id="menu-speed-slider" min="1.0" max="5.0" step="0.25" value="1.0" class="menu-speed-slider" />
           </div>
 
+          <!-- Volume Controls in Menu -->
+          <div class="menu-speed-block" style="margin-top: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size: 0.76rem; font-weight: 700; color: var(--text-dim); display: flex; align-items: center; gap: 6px;">
+                <span id="menu-vol-icon">🔊</span> <span>ÂM LƯỢNG:</span>
+              </span>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="ff-badge" id="menu-vol-label">100%</span>
+                <button type="button" id="btn-quick-mute" class="btn-mini" style="padding: 1px 6px; font-size: 0.7rem; border-radius: 4px;">Tắt</button>
+              </div>
+            </div>
+            <input type="range" id="menu-vol-slider" min="0" max="1" step="0.05" value="1" class="menu-speed-slider" style="accent-color: var(--accent-cyan);" />
+          </div>
+
           <div class="menu-divider"></div>
 
           <!-- Movement Control Mode Selector -->
@@ -429,8 +443,14 @@
           </div>
 
           <div class="setting-group">
-            <label>🔊 Âm lượng:</label>
-            <input type="range" id="setting-volume" min="0" max="1" step="0.05" value="1" style="accent-color: var(--accent-cyan);" />
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+              <label for="setting-volume">🔊 Âm lượng:</label>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span id="volume-val-display" style="font-weight: 700; color: var(--accent-cyan); font-size: 0.9rem; min-width: 44px; text-align: right;">100%</span>
+                <button type="button" id="btn-toggle-mute" class="btn-mini" style="padding: 2px 8px; font-size: 0.8rem;">Tắt tiếng</button>
+              </div>
+            </div>
+            <input type="range" id="setting-volume" min="0" max="1" step="0.05" value="1" style="accent-color: var(--accent-cyan); width: 100%; margin-top: 6px;" />
           </div>
 
           <div class="setting-group">

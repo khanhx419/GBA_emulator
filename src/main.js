@@ -580,6 +580,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (freezeVal !== null && freezeVal !== '') {
           const num = Number(freezeVal);
           const type = num > 65535 ? 'u32' : scanner.valueType;
+          scanner.writeValue(addr, num, type);
           gba.addFreeze(addr, num, type);
           renderScannerFrozenList();
           showAppToast(`❄️ Đã khóa địa chỉ 0x${addr.toString(16).toUpperCase()} = ${num} (${type.toUpperCase()})!`);
@@ -913,9 +914,66 @@ window.addEventListener('DOMContentLoaded', () => {
     shaders.setFilter(e.target.value);
   });
 
-  document.getElementById('setting-volume')?.addEventListener('input', (e) => {
-    gba.apu.setVolume(parseFloat(e.target.value));
-  });
+  // --- Volume Management (Synchronized Quick Menu & Settings) ---
+  const settingVolumeSlider = document.getElementById('setting-volume');
+  const volumeValDisplay = document.getElementById('volume-val-display');
+  const btnToggleMute = document.getElementById('btn-toggle-mute');
+
+  const menuVolSlider = document.getElementById('menu-vol-slider');
+  const menuVolLabel = document.getElementById('menu-vol-label');
+  const menuVolIcon = document.getElementById('menu-vol-icon');
+  const btnQuickMute = document.getElementById('btn-quick-mute');
+
+  const savedVolStr = localStorage.getItem('gba_k_volume');
+  let currentVolume = savedVolStr !== null ? parseFloat(savedVolStr) : 1.0;
+  if (isNaN(currentVolume)) currentVolume = 1.0;
+  let previousVolume = currentVolume > 0 ? currentVolume : 1.0;
+
+  const updateVolumeUI = (vol) => {
+    vol = Math.max(0, Math.min(1, vol));
+    const pct = Math.round(vol * 100);
+    const isMuted = (vol === 0);
+
+    if (settingVolumeSlider) settingVolumeSlider.value = vol;
+    if (menuVolSlider) menuVolSlider.value = vol;
+
+    if (volumeValDisplay) volumeValDisplay.textContent = isMuted ? 'Tắt' : `${pct}%`;
+    if (menuVolLabel) menuVolLabel.textContent = isMuted ? 'Tắt' : `${pct}%`;
+
+    const icon = isMuted ? '🔇' : (vol < 0.5 ? '🔉' : '🔊');
+    if (menuVolIcon) menuVolIcon.textContent = icon;
+
+    if (btnToggleMute) btnToggleMute.textContent = isMuted ? 'Bật tiếng' : 'Tắt tiếng';
+    if (btnQuickMute) btnQuickMute.textContent = isMuted ? 'Bật' : 'Tắt';
+
+    gba.apu.setVolume(vol);
+  };
+
+  const handleVolumeInput = (val) => {
+    currentVolume = Math.max(0, Math.min(1, parseFloat(val) ?? 0));
+    if (currentVolume > 0) previousVolume = currentVolume;
+    updateVolumeUI(currentVolume);
+    localStorage.setItem('gba_k_volume', currentVolume.toString());
+  };
+
+  const toggleMute = () => {
+    if (currentVolume > 0) {
+      previousVolume = currentVolume;
+      handleVolumeInput(0);
+      showAppToast('🔇 Đã tắt âm thanh');
+    } else {
+      handleVolumeInput(previousVolume || 1.0);
+      showAppToast(`🔊 Đã bật âm thanh (${Math.round((previousVolume || 1.0) * 100)}%)`);
+    }
+  };
+
+  settingVolumeSlider?.addEventListener('input', (e) => handleVolumeInput(e.target.value));
+  menuVolSlider?.addEventListener('input', (e) => handleVolumeInput(e.target.value));
+  btnToggleMute?.addEventListener('click', toggleMute);
+  btnQuickMute?.addEventListener('click', toggleMute);
+
+  // Initialize volume UI state
+  updateVolumeUI(currentVolume);
 
   document.getElementById('setting-haptic')?.addEventListener('change', (e) => {
     controls.hapticsEnabled = e.target.checked;

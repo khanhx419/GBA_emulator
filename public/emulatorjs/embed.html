@@ -270,7 +270,23 @@
           tryUnlockAudio();
         } else if (e.data.type === 'EJS_SET_SPEED') {
           pendingSpeed = { fastForward: e.data.fastForward, speedMultiplier: e.data.speedMultiplier };
-          applySpeed(e.data.fastForward, e.data.speedMultiplier);
+        } else if (e.data.type === 'EJS_SET_VOLUME') {
+          try {
+            const vol = Math.max(0, Math.min(1, parseFloat(e.data.volume) ?? 1.0));
+            if (window.EJS_emulator) {
+              if (typeof window.EJS_emulator.setVolume === 'function') {
+                window.EJS_emulator.setVolume(vol);
+              }
+              const al = window.EJS_emulator.Module?.AL;
+              if (al && al.currentCtx && al.currentCtx.sources) {
+                al.currentCtx.sources.forEach(s => {
+                  if (s.gain && s.gain.gain) {
+                    s.gain.gain.value = vol;
+                  }
+                });
+              }
+            }
+          } catch (err) {}
         } else if (e.data.type === 'EJS_FLUSH_SAVES') {
           try {
             const gm = window.EJS_emulator?.gameManager;

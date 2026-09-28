@@ -107,6 +107,11 @@ export class EmulatorAdapter {
         this._loadCheatsFromStorage();
         this.loadFreezeList();
 
+        const savedVol = localStorage.getItem('gba_k_volume');
+        if (savedVol !== null) {
+          this.setVolume(parseFloat(savedVol));
+        }
+
         this._applySpeed();
       } else if (event.data.type === 'EJS_BATTERY_SAVE_UPDATED') {
         const u8 = new Uint8Array(event.data.data);
@@ -736,16 +741,41 @@ export class EmulatorAdapter {
 
   // ===== AUDIO =====
 
+  setVolume(v) {
+    const vol = Math.max(0, Math.min(1, parseFloat(v) ?? 1.0));
+    this._volume = vol;
+    try {
+      localStorage.setItem('gba_k_volume', vol.toString());
+    } catch (e) {}
+
+    try {
+      this.iframe?.contentWindow?.postMessage({
+        type: 'EJS_SET_VOLUME',
+        volume: vol
+      }, '*');
+    } catch (e) {}
+
+    try {
+      const ejs = this.iframe?.contentWindow?.EJS_emulator;
+      if (ejs && typeof ejs.setVolume === 'function') {
+        ejs.setVolume(vol);
+      }
+      const al = ejs?.Module?.AL;
+      if (al?.currentCtx?.sources) {
+        al.currentCtx.sources.forEach(s => {
+          if (s.gain && s.gain.gain) {
+            s.gain.gain.value = vol;
+          }
+        });
+      }
+    } catch (e) {}
+  }
+
   get apu() {
     const self = this;
     return {
       setVolume(v) {
-        try {
-          const ejs = self.iframe?.contentWindow?.EJS_emulator;
-          if (ejs && ejs.setVolume) {
-            ejs.setVolume(Math.max(0, Math.min(1, v)));
-          }
-        } catch (e) {}
+        self.setVolume(v);
       }
     };
   }
@@ -1116,7 +1146,85 @@ export class EmulatorAdapter {
 
   // ===== FREEZE LIST =====
 
+  _startFreezeLoop() {
+    if (this._freezeTimer) return;
+    this._freezeTimer = setInterval(() => {
+      if (!this.romLoaded || this.paused || !this.freezeList || this.freezeList.length === 0) return;
+      this._applyAllFreezes();
+    }, 120);
+  }
+
+  _stopFreezeLoop() {
+    if (this._freezeTimer) {
+      clearInterval(this._freezeTimer);
+      this._freezeTimer = null;
+    }
+  }
+
+  _applyAllFreezes() {
+    const gm = this._gameManager;
+    if (!this.romLoaded || !gm || !this.freezeList || this.freezeList.length === 0) return;
+    try {
+      const snap = this.getMemorySnapshot();
+      if (!snap) return;
+      const state = snap.fullState;
+      let modified = false;
+
+      for (const f of this.freezeList) {
+        const addr = f.address;
+        const val = Number(f.value);
+        let type = f.dataType || (val > 65535 ? 'u32' : 'u16');
+        if (val > 65535 && type !== 'u32') type = 'u32';
+
+        let targetOffset = -1;
+        if (addr >= 0x02000000 && addr < 0x02040000) {
+          targetOffset = 0x21000 + (addr - 0x02000000);
+        } else if (addr >= 0x03000000 && addr < 0x03008000) {
+          targetOffset = 0x19000 + (addr - 0x03000000);
+        }
+
+        if (targetOffset !== -1) {
+          if (type === 'u8') {
+            const b0 = val & 0xFF;
+            if (state[targetOffset] !== b0) {
+              state[targetOffset] = b0;
+              modified = true;
+            }
+          } else if (type === 'u16') {
+            const b0 = val & 0xFF;
+            const b1 = (val >> 8) & 0xFF;
+            if (state[targetOffset] !== b0 || state[targetOffset + 1] !== b1) {
+              state[targetOffset] = b0;
+              state[targetOffset + 1] = b1;
+              modified = true;
+            }
+          } else if (type === 'u32') {
+            const b0 = val & 0xFF;
+            const b1 = (val >> 8) & 0xFF;
+            const b2 = (val >> 16) & 0xFF;
+            const b3 = (val >>> 24) & 0xFF;
+            if (state[targetOffset] !== b0 || state[targetOffset + 1] !== b1 ||
+                state[targetOffset + 2] !== b2 || state[targetOffset + 3] !== b3) {
+              state[targetOffset] = b0;
+              state[targetOffset + 1] = b1;
+              state[targetOffset + 2] = b2;
+              state[targetOffset + 3] = b3;
+              modified = true;
+            }
+          }
+        }
+      }
+
+      if (modified) {
+        gm.loadState(state);
+      }
+    } catch (e) {
+      console.warn('[EmulatorAdapter] _applyAllFreezes error:', e);
+    }
+  }
+
   applyFreezes() {
+    this._applyAllFreezes();
     this._applyCheatsToEJS();
   }
 
@@ -1124,13 +1232,18 @@ export class EmulatorAdapter {
     this.freezeList = this.freezeList.filter(f => f.address !== address);
     this.freezeList.push({ address, value, dataType });
     this.saveFreezeList();
+    this._applyAllFreezes();
     this._applyCheatsToEJS();
+    this._startFreezeLoop();
   }
 
   removeFreeze(address) {
     this.freezeList = this.freezeList.filter(f => f.address !== address);
     this.saveFreezeList();
     this._applyCheatsToEJS();
+    if (this.freezeList.length === 0) {
+      this._stopFreezeLoop();
+    }
   }
 
   saveFreezeList() {
@@ -1143,6 +1256,10 @@ export class EmulatorAdapter {
     try {
       const data = localStorage.getItem('myboy_freezes_' + (this.romTitle || 'default'));
       this.freezeList = data ? JSON.parse(data) : [];
+      if (this.freezeList.length > 0) {
+        this._applyAllFreezes();
+        this._startFreezeLoop();
+      }
       this._applyCheatsToEJS();
     } catch (e) {
       this.freezeList = [];

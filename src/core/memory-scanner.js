@@ -247,6 +247,7 @@ export class GBAMemoryScanner {
     for (const item of this.results) {
       const val = freezeVal !== null ? Number(freezeVal) : item.value;
       const type = val > 65535 ? 'u32' : this.valueType;
+      this.writeValue(item.address, val, type);
       this.gba.addFreeze(item.address, val, type);
     }
   }
