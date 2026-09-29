@@ -969,17 +969,14 @@ export class GBAControls {
   }
 
   // =========================================================================
-  // Gamepad API
+  // Gamepad API — Event-driven polling to save battery and CPU
   // =========================================================================
   initGamepad() {
-    window.addEventListener('gamepadconnected', (e) => {
-      console.log('Gamepad connected:', e.gamepad.id);
-      this.pollGamepad();
-    });
-  }
+    let pollId = null;
+    let connected = false;
 
-  pollGamepad() {
     const poll = () => {
+      if (!connected) return;
       const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
       const gp = gamepads[0];
       if (gp && !this.isEditingLayout) {
@@ -994,8 +991,23 @@ export class GBAControls {
         if (gp.buttons[14]?.pressed || gp.axes[0] < -0.5) this.gba.setKeyDown(KEYS.LEFT); else this.gba.setKeyUp(KEYS.LEFT);
         if (gp.buttons[15]?.pressed || gp.axes[0] > 0.5) this.gba.setKeyDown(KEYS.RIGHT); else this.gba.setKeyUp(KEYS.RIGHT);
       }
-      requestAnimationFrame(poll);
+      pollId = requestAnimationFrame(poll);
     };
-    poll();
+
+    window.addEventListener('gamepadconnected', (e) => {
+      connected = true;
+      if (!pollId) pollId = requestAnimationFrame(poll);
+    });
+
+    window.addEventListener('gamepaddisconnected', () => {
+      const remaining = (navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean);
+      if (remaining.length === 0) {
+        connected = false;
+        if (pollId) {
+          cancelAnimationFrame(pollId);
+          pollId = null;
+        }
+      }
+    });
   }
 }

@@ -190,6 +190,12 @@ export class EmulatorAdapter {
       cancelAnimationFrame(this._fpsRafId);
       this._fpsRafId = null;
     }
+    if (this._fpsIntervalId) {
+      clearInterval(this._fpsIntervalId);
+      this._fpsIntervalId = null;
+    }
+    // Stop any legacy freeze timer
+    this._stopFreezeLoop();
 
     // Hide original canvas, show iframe
     this.canvas.style.display = 'none';
@@ -783,35 +789,46 @@ export class EmulatorAdapter {
   // ===== FPS COUNTER =====
 
   _startFpsCounter() {
+    // Clean up any previous counter
     if (this._fpsRafId) cancelAnimationFrame(this._fpsRafId);
+    if (this._fpsIntervalId) clearInterval(this._fpsIntervalId);
+
     this._fpsFrames = 0;
     this._fpsLastTime = performance.now();
     let lastFrameNum = 0;
 
-    const tick = () => {
+    // Cache gameManager reference once — avoids cross-iframe property chain every tick
+    let cachedGm = this._gameManager;
+
+    // Use setInterval(1000) instead of requestAnimationFrame — only fires once per second
+    // vs rAF which fires 60-144 times/sec and crosses the iframe boundary each time
+    this._fpsIntervalId = setInterval(() => {
+      if (!this.romLoaded) return;
       const now = performance.now();
-      const gm = this._gameManager;
-      if (now - this._fpsLastTime >= 1000) {
-        if (gm && typeof gm.getFrameNum === 'function') {
+      const elapsed = now - this._fpsLastTime;
+      if (elapsed < 500) return; // Guard against early fires
+
+      // Refresh cached GM if needed
+      if (!cachedGm) cachedGm = this._gameManager;
+      const gm = cachedGm;
+
+      if (gm && typeof gm.getFrameNum === 'function') {
+        try {
           const currentFrameNum = gm.getFrameNum();
           if (currentFrameNum > 0 && lastFrameNum > 0) {
-            const diff = currentFrameNum - lastFrameNum;
-            this.fps = Math.max(0, diff);
-          } else {
-            this.fps = this._fpsFrames;
+            // Scale to per-second rate
+            this.fps = Math.round((currentFrameNum - lastFrameNum) * (1000 / elapsed));
           }
           lastFrameNum = currentFrameNum;
-        } else {
-          this.fps = this._fpsFrames;
+        } catch (e) {
+          // gameManager may have been destroyed
+          cachedGm = null;
         }
-        this._fpsFrames = 0;
-        this._fpsLastTime = now;
-        if (this.onFpsUpdate) this.onFpsUpdate(this.fps);
       }
-      this._fpsFrames++;
-      this._fpsRafId = requestAnimationFrame(tick);
-    };
-    tick();
+
+      this._fpsLastTime = now;
+      if (this.onFpsUpdate) this.onFpsUpdate(this.fps);
+    }, 1000);
   }
 
   // ===== BATTERY SAVE =====
@@ -1145,16 +1162,16 @@ export class EmulatorAdapter {
   }
 
   // ===== FREEZE LIST =====
+  // Freezes work ENTIRELY through mGBA's native cheat engine (setCheat).
+  // This is ~10,000x faster than the old approach which did full save/load state
+  // (400KB serialize + deserialize) every 120ms via setInterval.
 
   _startFreezeLoop() {
-    if (this._freezeTimer) return;
-    this._freezeTimer = setInterval(() => {
-      if (!this.romLoaded || this.paused || !this.freezeList || this.freezeList.length === 0) return;
-      this._applyAllFreezes();
-    }, 120);
+    // No longer needed — freezes are applied as cheats via _applyCheatsToEJS()
   }
 
   _stopFreezeLoop() {
+    // Clean up old timer if it exists from a previous version
     if (this._freezeTimer) {
       clearInterval(this._freezeTimer);
       this._freezeTimer = null;
@@ -1162,69 +1179,11 @@ export class EmulatorAdapter {
   }
 
   _applyAllFreezes() {
-    const gm = this._gameManager;
-    if (!this.romLoaded || !gm || !this.freezeList || this.freezeList.length === 0) return;
-    try {
-      const snap = this.getMemorySnapshot();
-      if (!snap) return;
-      const state = snap.fullState;
-      let modified = false;
-
-      for (const f of this.freezeList) {
-        const addr = f.address;
-        const val = Number(f.value);
-        let type = f.dataType || (val > 65535 ? 'u32' : 'u16');
-        if (val > 65535 && type !== 'u32') type = 'u32';
-
-        let targetOffset = -1;
-        if (addr >= 0x02000000 && addr < 0x02040000) {
-          targetOffset = 0x21000 + (addr - 0x02000000);
-        } else if (addr >= 0x03000000 && addr < 0x03008000) {
-          targetOffset = 0x19000 + (addr - 0x03000000);
-        }
-
-        if (targetOffset !== -1) {
-          if (type === 'u8') {
-            const b0 = val & 0xFF;
-            if (state[targetOffset] !== b0) {
-              state[targetOffset] = b0;
-              modified = true;
-            }
-          } else if (type === 'u16') {
-            const b0 = val & 0xFF;
-            const b1 = (val >> 8) & 0xFF;
-            if (state[targetOffset] !== b0 || state[targetOffset + 1] !== b1) {
-              state[targetOffset] = b0;
-              state[targetOffset + 1] = b1;
-              modified = true;
-            }
-          } else if (type === 'u32') {
-            const b0 = val & 0xFF;
-            const b1 = (val >> 8) & 0xFF;
-            const b2 = (val >> 16) & 0xFF;
-            const b3 = (val >>> 24) & 0xFF;
-            if (state[targetOffset] !== b0 || state[targetOffset + 1] !== b1 ||
-                state[targetOffset + 2] !== b2 || state[targetOffset + 3] !== b3) {
-              state[targetOffset] = b0;
-              state[targetOffset + 1] = b1;
-              state[targetOffset + 2] = b2;
-              state[targetOffset + 3] = b3;
-              modified = true;
-            }
-          }
-        }
-      }
-
-      if (modified) {
-        gm.loadState(state);
-      }
-    } catch (e) {
-      console.warn('[EmulatorAdapter] _applyAllFreezes error:', e);
-    }
+    // Simply push all freezes as cheat codes to the mGBA core
+    this._applyCheatsToEJS();
   }
 
   applyFreezes() {
-    this._applyAllFreezes();
     this._applyCheatsToEJS();
   }
 
@@ -1232,18 +1191,13 @@ export class EmulatorAdapter {
     this.freezeList = this.freezeList.filter(f => f.address !== address);
     this.freezeList.push({ address, value, dataType });
     this.saveFreezeList();
-    this._applyAllFreezes();
     this._applyCheatsToEJS();
-    this._startFreezeLoop();
   }
 
   removeFreeze(address) {
     this.freezeList = this.freezeList.filter(f => f.address !== address);
     this.saveFreezeList();
     this._applyCheatsToEJS();
-    if (this.freezeList.length === 0) {
-      this._stopFreezeLoop();
-    }
   }
 
   saveFreezeList() {
@@ -1256,10 +1210,9 @@ export class EmulatorAdapter {
     try {
       const data = localStorage.getItem('myboy_freezes_' + (this.romTitle || 'default'));
       this.freezeList = data ? JSON.parse(data) : [];
-      if (this.freezeList.length > 0) {
-        this._applyAllFreezes();
-        this._startFreezeLoop();
-      }
+      // Stop any legacy freeze timer from previous versions
+      this._stopFreezeLoop();
+      // Apply all freezes as cheat codes
       this._applyCheatsToEJS();
     } catch (e) {
       this.freezeList = [];

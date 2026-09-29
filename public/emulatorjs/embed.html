@@ -63,8 +63,19 @@
   <div id="game"></div>
   <script>
     // Proactively remove any virtual gamepad & message elements injected by EmulatorJS
-    const cleanupObserver = new MutationObserver(() => {
-      document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="virtualGamepad"], [class*="ejs_virtualGamepad"], [class*="ejs_menu_bar"], .ejs_message, [class*="ejs_message"]').forEach(el => el.remove());
+    // Use a simple class list check instead of querySelectorAll on every mutation
+    let cleanupActive = true;
+    const cleanupObserver = new MutationObserver((mutations) => {
+      if (!cleanupActive) return;
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          const cn = node.className || '';
+          if (typeof cn === 'string' && (cn.includes('virtualGamepad') || cn.includes('ejs_message') || cn.includes('ejs_menu_bar'))) {
+            node.remove();
+          }
+        }
+      }
     });
     // Hook EJS_GameManager to guarantee fastforward_frameskip and audio_fastforward_mute
     Object.defineProperty(window, 'EJS_GameManager', {
@@ -202,6 +213,9 @@
           }
         } catch (e) {}
         document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="virtualGamepad"], .ejs_message, [class*="ejs_message"]').forEach(el => el.remove());
+        // Stop the MutationObserver — all EJS UI has been cleaned up by now
+        cleanupActive = false;
+        cleanupObserver.disconnect();
         window.parent.postMessage({ type: 'EJS_GAME_STARTED' }, '*');
       };
 
@@ -270,6 +284,7 @@
           tryUnlockAudio();
         } else if (e.data.type === 'EJS_SET_SPEED') {
           pendingSpeed = { fastForward: e.data.fastForward, speedMultiplier: e.data.speedMultiplier };
+          applySpeed(e.data.fastForward, e.data.speedMultiplier);
         } else if (e.data.type === 'EJS_SET_VOLUME') {
           try {
             const vol = Math.max(0, Math.min(1, parseFloat(e.data.volume) ?? 1.0));
@@ -311,7 +326,7 @@
         }
       });
 
-      // Background periodic save flush to IndexedDB every 8 seconds
+      // Background periodic save flush to IndexedDB every 30 seconds (was 8s — way too frequent)
       setInterval(() => {
         try {
           const gm = window.EJS_emulator?.gameManager;
@@ -319,7 +334,7 @@
             gm.saveSaveFiles();
           }
         } catch (err) {}
-      }, 8000);
+      }, 30000);
 
       // Load loader script
       const script = document.createElement('script');
