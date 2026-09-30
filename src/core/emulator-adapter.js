@@ -581,7 +581,9 @@ export class EmulatorAdapter {
       get cheats() { return self._cheats; },
       addCheat(name, code) {
         const id = Date.now().toString(36);
-        self._cheats.push({ id, name: name || 'Cheat', code, enabled: true });
+        const lines = (code || '').trim().split(/[\r\n]+/);
+        const formatted = lines.map(l => self.normalizeGbaCheatLine(l) || l.trim()).filter(Boolean).join('\n');
+        self._cheats.push({ id, name: name || 'Cheat', code: formatted, enabled: true });
         self._applyCheatsToEJS();
         self._saveCheatsToStorage();
       },
@@ -738,7 +740,13 @@ export class EmulatorAdapter {
   _loadCheatsFromStorage() {
     try {
       const data = localStorage.getItem('myboy_cheats_' + (this.romTitle || 'default'));
-      this._cheats = data ? JSON.parse(data) : [];
+      const raw = data ? JSON.parse(data) : [];
+      this._cheats = raw.map(c => {
+        if (!c.code) return c;
+        const lines = c.code.trim().split(/[\r\n]+/);
+        const formatted = lines.map(l => this.normalizeGbaCheatLine(l) || l.trim()).filter(Boolean).join('\n');
+        return { ...c, code: formatted };
+      });
       this._applyCheatsToEJS();
     } catch (e) {
       this._cheats = [];

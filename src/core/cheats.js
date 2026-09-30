@@ -8,10 +8,25 @@ export class GBACheats {
 
   addCheat(name, code, type = 'RAW') {
     const id = 'cheat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const lines = (code || '').trim().split(/[\r\n]+/);
+    const formatted = lines.map(l => {
+      const hex = l.trim().toUpperCase().replace(/[^0-9A-F]/g, '');
+      if (hex.length === 12) {
+        let addr = hex.substring(0, 8);
+        const val = hex.substring(8, 12);
+        if (addr.startsWith('02')) addr = '82' + addr.substring(2);
+        else if (addr.startsWith('03')) addr = '83' + addr.substring(2);
+        return `${addr} ${val}`;
+      } else if (hex.length === 16) {
+        return `${hex.substring(0, 8)} ${hex.substring(8, 16)}`;
+      }
+      return l.trim().toUpperCase();
+    }).filter(Boolean).join('\n');
+
     const item = {
       id,
       name: name || 'Cheat #' + (this.cheats.length + 1),
-      code: code.trim().toUpperCase(),
+      code: formatted,
       type,
       enabled: true
     };

@@ -479,14 +479,40 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   };
 
+  const cheatCodeInput = document.getElementById('cheat-code');
+  if (cheatCodeInput) {
+    const autoFormatCheatInput = () => {
+      const val = cheatCodeInput.value;
+      if (!val.trim()) return;
+      const lines = val.split(/[\r\n]+/);
+      const formatted = lines.map(line => {
+        if (gba.normalizeGbaCheatLine) {
+          return gba.normalizeGbaCheatLine(line) || line.trim();
+        }
+        return line.trim();
+      }).join('\n');
+      if (formatted !== val) {
+        cheatCodeInput.value = formatted;
+      }
+    };
+    cheatCodeInput.addEventListener('blur', autoFormatCheatInput);
+    cheatCodeInput.addEventListener('paste', () => setTimeout(autoFormatCheatInput, 50));
+  }
+
   document.getElementById('btn-add-cheat')?.addEventListener('click', () => {
     const nameInput = document.getElementById('cheat-name');
     const codeInput = document.getElementById('cheat-code');
     if (codeInput && codeInput.value.trim()) {
-      gba.cheats.addCheat(nameInput.value, codeInput.value);
+      let codeVal = codeInput.value.trim();
+      if (gba.normalizeGbaCheatLine) {
+        const lines = codeVal.split(/[\r\n]+/);
+        codeVal = lines.map(line => gba.normalizeGbaCheatLine(line) || line.trim()).join('\n');
+      }
+      gba.cheats.addCheat(nameInput.value, codeVal);
       nameInput.value = '';
       codeInput.value = '';
       renderCheatsList();
+      showAppToast('✅ Đã thêm mã Cheat thành công!');
     }
   });
 

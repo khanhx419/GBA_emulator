@@ -126,6 +126,13 @@ export class GBAControls {
 
   initKeyboard() {
     window.addEventListener('keydown', (e) => {
+      // Never intercept when user is typing in form inputs, textareas or modals
+      const activeEl = document.activeElement;
+      const tag = activeEl ? activeEl.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || activeEl?.isContentEditable) {
+        return;
+      }
+
       // Hotkeys
       if (e.code === 'Tab') {
         e.preventDefault();
@@ -154,6 +161,13 @@ export class GBAControls {
     });
 
     window.addEventListener('keyup', (e) => {
+      // Never intercept when user is typing in form inputs, textareas or modals
+      const activeEl = document.activeElement;
+      const tag = activeEl ? activeEl.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || activeEl?.isContentEditable) {
+        return;
+      }
+
       if (e.code === 'Tab') {
         e.preventDefault();
         this.gba.fastForward = false;
