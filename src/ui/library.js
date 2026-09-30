@@ -2,9 +2,9 @@
 
 export const PRELOADED_GAMES = [
   {
-    title: 'Pokemon - Radical Red (v4.0)',
-    fileName: 'Radical Red (v4.0).gba',
-    url: '/game/Radical%20Red%20(v4.0).gba',
+    title: 'Pokemon - Radical Red (v4.1)',
+    fileName: 'radical_red(v4.1).gba',
+    url: '/game/radical_red(v4.1).gba',
     size: '32.0 MB'
   }
 ];
