@@ -1,13 +1,6 @@
 // ROM Library Manager with IndexedDB persistence, Local folder support & Demo GBA ROMs
 
-export const PRELOADED_GAMES = [
-  {
-    title: 'Pokemon - Radical Red (v4.1)',
-    fileName: 'radical_red(v4.1).gba',
-    url: '/game/radical_red(v4.1).gba',
-    size: '32.0 MB'
-  }
-];
+export const PRELOADED_GAMES = [];
 
 export class GBALibrary {
   constructor(gba, onRomSelected) {
@@ -101,16 +94,28 @@ export class GBALibrary {
     // Render preloaded / local games section
     const preloadedContainer = document.getElementById('preloaded-games-list');
     if (preloadedContainer) {
-      preloadedContainer.innerHTML = PRELOADED_GAMES.map(g => `
-        <div class="rom-item" style="border-left: 3px solid var(--accent-cyan);">
-          <div class="rom-icon">🔥</div>
-          <div class="rom-details">
-            <div class="rom-title">${g.title}</div>
-            <div class="rom-meta">${g.size} • Sẵn sàng trong thư mục /game</div>
+      const prevHeading = preloadedContainer.previousElementSibling;
+      if (PRELOADED_GAMES.length === 0) {
+        preloadedContainer.style.display = 'none';
+        if (prevHeading && prevHeading.tagName === 'H4') {
+          prevHeading.style.display = 'none';
+        }
+      } else {
+        preloadedContainer.style.display = 'flex';
+        if (prevHeading && prevHeading.tagName === 'H4') {
+          prevHeading.style.display = 'block';
+        }
+        preloadedContainer.innerHTML = PRELOADED_GAMES.map(g => `
+          <div class="rom-item" style="border-left: 3px solid var(--accent-cyan);">
+            <div class="rom-icon">🔥</div>
+            <div class="rom-details">
+              <div class="rom-title">${g.title}</div>
+              <div class="rom-meta">${g.size} • Sẵn sàng trong thư mục /game</div>
+            </div>
+            <button class="btn-play-rom btn-load-url" data-url="${g.url}" data-name="${g.fileName}">▶ Chơi ngay</button>
           </div>
-          <button class="btn-play-rom btn-load-url" data-url="${g.url}" data-name="${g.fileName}">▶ Chơi ngay</button>
-        </div>
-      `).join('');
+        `).join('');
+      }
 
       preloadedContainer.querySelectorAll('.btn-load-url').forEach(btn => {
         btn.addEventListener('click', async () => {
