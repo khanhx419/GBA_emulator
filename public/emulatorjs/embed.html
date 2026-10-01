@@ -94,8 +94,14 @@
             if (!cfg.includes('audio_fastforward_mute')) {
               cfg += '\naudio_fastforward_mute = true\n';
             }
-            if (!cfg.includes('audio_sync = false')) {
-              cfg += '\naudio_sync = false\naudio_rate_control = false\nvideo_vsync = false\n';
+            if (!cfg.includes('audio_rate_control')) {
+              cfg += '\naudio_rate_control = false\n';
+            }
+            if (!cfg.includes('video_vsync')) {
+              cfg += '\nvideo_vsync = true\n';
+            }
+            if (!cfg.includes('audio_sync')) {
+              cfg += '\naudio_sync = true\n';
             }
             if (!cfg.includes('video_font_enable')) {
               cfg += '\nvideo_font_enable = false\nnotification_show_fast_forward = false\nvideo_message_pos_x = 2.0\nvideo_message_pos_y = 2.0\n';
@@ -202,7 +208,7 @@
           if (gm) {
             const setVar = gm.setVariable || gm.functions?.setVariable;
             if (setVar) {
-              setVar.call(gm, 'mgba_frameskip', 'auto');
+              setVar.call(gm, 'mgba_frameskip', 'disabled');
               setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
               setVar.call(gm, 'mgba_interframe_blending', 'disabled');
               setVar.call(gm, 'mgba_color_correction', 'disabled');
@@ -273,6 +279,18 @@
             if (setVar) {
               setVar.call(gm, 'mgba_frameskip', fastForward ? 'auto' : 'disabled');
               setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
+            }
+
+            // Toggle audio_sync: OFF during fast-forward (so audio doesn't throttle CPU),
+            // ON at normal speed (so main loop syncs to audio output ~60Hz)
+            if (gm.Module && gm.Module.ccall) {
+              try {
+                // RetroArch runtime config override via retroarch_set_config_option
+                gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'],
+                  ['audio_sync', fastForward ? 'false' : 'true']);
+                gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'],
+                  ['video_vsync', fastForward ? 'false' : 'true']);
+              } catch (e) {}
             }
           } catch (err) {}
         }
