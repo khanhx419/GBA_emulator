@@ -113,6 +113,9 @@ export class EmulatorAdapter {
           this.setVolume(parseFloat(savedVol));
         }
 
+        const savedVsync = localStorage.getItem('myboy_vsync') !== 'false';
+        this.setVSync(savedVsync);
+
         this._applySpeed();
       } else if (event.data.type === 'EJS_BATTERY_SAVE_UPDATED') {
         const u8 = new Uint8Array(event.data.data);

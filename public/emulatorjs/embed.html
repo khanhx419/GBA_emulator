@@ -77,43 +77,7 @@
         }
       }
     });
-    // Hook EJS_GameManager to guarantee fastforward_frameskip and audio_fastforward_mute
-    Object.defineProperty(window, 'EJS_GameManager', {
-      configurable: true,
-      enumerable: true,
-      get() { return this._EJS_GM; },
-      set(cls) {
-        this._EJS_GM = cls;
-        if (cls && cls.prototype) {
-          const origGetCfg = cls.prototype.getRetroArchCfg;
-          cls.prototype.getRetroArchCfg = function() {
-            let cfg = origGetCfg ? origGetCfg.call(this) : '';
-            if (!cfg.includes('fastforward_frameskip')) {
-              cfg += '\nfastforward_frameskip = true\n';
-            }
-            if (!cfg.includes('audio_fastforward_mute')) {
-              cfg += '\naudio_fastforward_mute = true\n';
-            }
-            if (!cfg.includes('audio_rate_control')) {
-              cfg += '\naudio_rate_control = false\n';
-            }
-            if (!cfg.includes('video_vsync')) {
-              cfg += '\nvideo_vsync = true\n';
-            }
-            if (!cfg.includes('audio_sync')) {
-              cfg += '\naudio_sync = true\n';
-            }
-            if (!cfg.includes('video_font_enable')) {
-              cfg += '\nvideo_font_enable = false\nnotification_show_fast_forward = false\nvideo_message_pos_x = 2.0\nvideo_message_pos_y = 2.0\n';
-            }
-            if (!cfg.includes('autosave_interval')) {
-              cfg += '\nautosave_interval = 10\n';
-            }
-            return cfg;
-          };
-        }
-      }
-    });
+
 
     // Receive game configuration from parent
     window.addEventListener('message', function(event) {
@@ -206,6 +170,10 @@
           const gm = window.EJS_emulator?.gameManager;
           // Enable mGBA core frameskip & idle optimization directly via runtime Cwrap
           if (gm) {
+            const setVSync = gm.setVSync || gm.functions?.setVSync;
+            if (setVSync) {
+              setVSync.call(gm, userVSyncEnabled ? 1 : 0);
+            }
             const setVar = gm.setVariable || gm.functions?.setVariable;
             if (setVar) {
               setVar.call(gm, 'mgba_frameskip', '0');
