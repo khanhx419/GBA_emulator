@@ -21,6 +21,13 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void optimizeWebView() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                android.view.WindowManager.LayoutParams layoutParams = getWindow().getAttributes();
+                layoutParams.preferredRefreshRate = 60.0f;
+                getWindow().setAttributes(layoutParams);
+            } catch (Exception ignored) {}
+        }
         if (getBridge() != null && getBridge().getWebView() != null) {
             WebView webView = getBridge().getWebView();
             webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);

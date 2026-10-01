@@ -153,8 +153,6 @@ class EJS_GameManager {
             "video_vsync = true\n" +
             "audio_sync = true\n" +
             "audio_rate_control = true\n" +
-            "video_refresh_rate = 60.0\n" +
-            "vrr_runloop_enable = true\n" +
             "video_smooth = false\n" +
             "video_font_enable = false\n" +
             "notification_show_fast_forward = false\n" +

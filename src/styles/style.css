@@ -486,6 +486,8 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
+  contain: strict;
+  transform: translateZ(0);
 }
 
 #gba-screen {
