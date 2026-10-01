@@ -17,6 +17,15 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         hideSystemUI();
         setupDownloadBridge();
+        optimizeWebView();
+    }
+
+    private void optimizeWebView() {
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            WebView webView = getBridge().getWebView();
+            webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
+        }
     }
 
     private void setupDownloadBridge() {

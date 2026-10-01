@@ -188,9 +188,11 @@ export class GBAControls {
     const dpad = document.getElementById('dpad');
     if (dpad) {
       let activeTouchId = null;
+      let dpadRect = null;
 
       const handleDpad = (clientX, clientY) => {
-        const rect = dpad.getBoundingClientRect();
+        if (!dpadRect) dpadRect = dpad.getBoundingClientRect();
+        const rect = dpadRect;
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
         const dx = clientX - centerX;
@@ -222,6 +224,7 @@ export class GBAControls {
 
       dpad.addEventListener('touchstart', (e) => {
         e.preventDefault();
+        dpadRect = dpad.getBoundingClientRect();
         if (e.changedTouches.length > 0) {
           const t = e.changedTouches[0];
           activeTouchId = t.identifier;
