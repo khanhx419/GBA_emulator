@@ -70,6 +70,13 @@ window.addEventListener('DOMContentLoaded', () => {
     if (hamburgerDropdown) hamburgerDropdown.classList.remove('open');
     const modal = document.getElementById(id);
     if (modal) modal.classList.add('open');
+    try {
+      if (typeof gba.flushSaves === 'function') {
+        gba.flushSaves();
+      } else {
+        gba.iframe?.contentWindow?.postMessage({ type: 'EJS_FLUSH_SAVES' }, '*');
+      }
+    } catch (e) {}
   };
 
   const closeAllModals = () => {
@@ -849,61 +856,89 @@ window.addEventListener('DOMContentLoaded', () => {
     renderKeybindGrid();
   });
 
-  // --- Settings & Menu Fast-Forward Controls ---
+  // --- Settings Speed Controls ---
   const speedSliderModal = document.getElementById('setting-speed');
-  const speedSliderMenu = document.getElementById('menu-speed-slider');
   const speedDisplay = document.getElementById('speed-val-display');
-  const ffLabel = document.getElementById('ff-label');
   const speedPresets = document.querySelectorAll('.btn-speed-preset');
 
-  const updateSpeed = (val) => {
-    const num = Math.max(1.0, Math.min(5.0, parseFloat(val) || 1.0));
-    gba.speedMultiplier = num;
-    gba.fastForward = num > 1.001;
-    const formatted = `${num.toFixed(num % 1 === 0 ? 1 : 2)}x`;
+  // Preferred target fast-forward speed multiplier (default 2.0x, range 1.5x - 5.0x)
+  let targetFfMultiplier = parseFloat(localStorage.getItem('myboy_ff_multiplier')) || 2.0;
 
+  const updateSpeedUI = (multiplier) => {
+    const num = Math.max(1.0, Math.min(5.0, parseFloat(multiplier) || 1.0));
+    const formatted = `${num.toFixed(num % 1 === 0 ? 1 : 2)}x`;
     if (speedSliderModal) speedSliderModal.value = num;
-    if (speedSliderMenu) speedSliderMenu.value = num;
     if (speedDisplay) speedDisplay.textContent = formatted;
-    if (ffLabel) ffLabel.textContent = formatted;
 
     speedPresets.forEach(btn => {
       const pSpd = parseFloat(btn.getAttribute('data-speed'));
       btn.classList.toggle('active', Math.abs(pSpd - num) < 0.05);
     });
-
-    try {
-      localStorage.setItem('myboy_ff_speed', num.toString());
-    } catch (e) {}
   };
 
-  // Load saved speed or default 1.0 (normal)
-  const savedSpeed = localStorage.getItem('myboy_ff_speed') || '1.0';
-  updateSpeed(savedSpeed);
+  const applySpeedSetting = (multiplier, activate = false) => {
+    const num = Math.max(1.0, Math.min(5.0, parseFloat(multiplier) || 1.0));
+    if (num > 1.001) {
+      targetFfMultiplier = num;
+      try {
+        localStorage.setItem('myboy_ff_multiplier', num.toString());
+      } catch (e) {}
+    }
 
-  speedSliderModal?.addEventListener('input', (e) => updateSpeed(e.target.value));
-  speedSliderMenu?.addEventListener('input', (e) => updateSpeed(e.target.value));
+    if (num <= 1.001) {
+      gba.speedMultiplier = 1.0;
+      gba.fastForward = false;
+    } else {
+      gba.speedMultiplier = num;
+      if (activate) {
+        gba.fastForward = true;
+      }
+    }
+
+    const ffBtn = document.getElementById('btn-fastforward');
+    if (ffBtn) ffBtn.classList.toggle('active', !!gba.fastForward);
+
+    updateSpeedUI(num);
+  };
+
+  // Always start with 1.0x (normal speed), Fast-Forward OFF
+  gba.fastForward = false;
+  gba.speedMultiplier = 1.0;
+  updateSpeedUI(1.0);
+
+  speedSliderModal?.addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    applySpeedSetting(val, val > 1.001);
+  });
 
   speedPresets.forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const spd = parseFloat(btn.getAttribute('data-speed'));
-      updateSpeed(spd);
+      applySpeedSetting(spd, spd > 1.001);
     });
   });
 
+  // --- VSync Setting ---
+  const vsyncToggle = document.getElementById('setting-vsync');
+  const savedVsync = localStorage.getItem('myboy_vsync') !== 'false';
+  if (vsyncToggle) {
+    vsyncToggle.checked = savedVsync;
+    gba.setVSync(savedVsync);
+    vsyncToggle.addEventListener('change', (e) => {
+      const enabled = e.target.checked;
+      localStorage.setItem('myboy_vsync', enabled ? 'true' : 'false');
+      gba.setVSync(enabled);
+      showAppToast(enabled ? '🔄 Đã bật VSync (60 FPS chuẩn)' : '⚡ Đã tắt VSync (Giảm độ trễ)');
+    });
+  }
+
   // --- Movement Mode (D-Pad / Fixed Joystick / Floating Joystick) ---
   const controlTypeSelect = document.getElementById('setting-control-type');
-  const ctrlModeButtons = document.querySelectorAll('.btn-ctrl-mode');
 
   const updateMovementMode = (mode) => {
     controls.setMovementMode(mode);
     if (controlTypeSelect) controlTypeSelect.value = mode;
-
-    ctrlModeButtons.forEach(btn => {
-      btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
-    });
-
     try {
       localStorage.setItem('myboy_control_type', mode);
     } catch (e) {}
@@ -911,18 +946,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const savedMode = localStorage.getItem('myboy_control_type') || 'dpad';
   updateMovementMode(savedMode);
-
   controlTypeSelect?.addEventListener('change', (e) => updateMovementMode(e.target.value));
 
-  ctrlModeButtons.forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const mode = btn.getAttribute('data-mode');
-      updateMovementMode(mode);
-    });
-  });
-
-  // --- Layout Editor Triggers ---
+  // --- Layout Editor Trigger ---
   const triggerLayoutEditor = () => {
     closeAllModals();
     if (hamburgerDropdown) hamburgerDropdown.classList.remove('open');
@@ -934,21 +960,15 @@ window.addEventListener('DOMContentLoaded', () => {
   };
 
   document.getElementById('btn-open-layout-editor')?.addEventListener('click', triggerLayoutEditor);
-  document.getElementById('btn-menu-layout-editor')?.addEventListener('click', triggerLayoutEditor);
 
   document.getElementById('setting-shader')?.addEventListener('change', (e) => {
     shaders.setFilter(e.target.value);
   });
 
-  // --- Volume Management (Synchronized Quick Menu & Settings) ---
+  // --- Volume Management (Settings Modal) ---
   const settingVolumeSlider = document.getElementById('setting-volume');
   const volumeValDisplay = document.getElementById('volume-val-display');
   const btnToggleMute = document.getElementById('btn-toggle-mute');
-
-  const menuVolSlider = document.getElementById('menu-vol-slider');
-  const menuVolLabel = document.getElementById('menu-vol-label');
-  const menuVolIcon = document.getElementById('menu-vol-icon');
-  const btnQuickMute = document.getElementById('btn-quick-mute');
 
   const savedVolStr = localStorage.getItem('gba_k_volume');
   let currentVolume = savedVolStr !== null ? parseFloat(savedVolStr) : 1.0;
@@ -961,16 +981,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const isMuted = (vol === 0);
 
     if (settingVolumeSlider) settingVolumeSlider.value = vol;
-    if (menuVolSlider) menuVolSlider.value = vol;
-
     if (volumeValDisplay) volumeValDisplay.textContent = isMuted ? 'Tắt' : `${pct}%`;
-    if (menuVolLabel) menuVolLabel.textContent = isMuted ? 'Tắt' : `${pct}%`;
-
-    const icon = isMuted ? '🔇' : (vol < 0.5 ? '🔉' : '🔊');
-    if (menuVolIcon) menuVolIcon.textContent = icon;
-
     if (btnToggleMute) btnToggleMute.textContent = isMuted ? 'Bật tiếng' : 'Tắt tiếng';
-    if (btnQuickMute) btnQuickMute.textContent = isMuted ? 'Bật' : 'Tắt';
 
     gba.apu.setVolume(vol);
   };
@@ -994,9 +1006,7 @@ window.addEventListener('DOMContentLoaded', () => {
   };
 
   settingVolumeSlider?.addEventListener('input', (e) => handleVolumeInput(e.target.value));
-  menuVolSlider?.addEventListener('input', (e) => handleVolumeInput(e.target.value));
   btnToggleMute?.addEventListener('click', toggleMute);
-  btnQuickMute?.addEventListener('click', toggleMute);
 
   // Initialize volume UI state
   updateVolumeUI(currentVolume);

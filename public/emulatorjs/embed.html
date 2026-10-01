@@ -208,7 +208,7 @@
           if (gm) {
             const setVar = gm.setVariable || gm.functions?.setVariable;
             if (setVar) {
-              setVar.call(gm, 'mgba_frameskip', 'disabled');
+              setVar.call(gm, 'mgba_frameskip', '0');
               setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
               setVar.call(gm, 'mgba_interframe_blending', 'disabled');
               setVar.call(gm, 'mgba_color_correction', 'disabled');
@@ -242,6 +242,27 @@
 
       let pendingSpeed = null;
 
+      let userVSyncEnabled = true;
+
+      function flushSaveToDisk() {
+        try {
+          const gm = window.EJS_emulator?.gameManager;
+          if (gm && typeof gm.saveSaveFiles === 'function') {
+            gm.saveSaveFiles();
+          }
+          if (gm?.FS) {
+            gm.FS.syncfs(false, () => {});
+          }
+        } catch (err) {}
+      }
+
+      // Safe event-driven flush on app hide or close (never interrupts active gameplay)
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) flushSaveToDisk();
+      });
+      window.addEventListener('beforeunload', flushSaveToDisk);
+      window.addEventListener('pagehide', flushSaveToDisk);
+
       function applySpeed(fastForward, speedMultiplier) {
         const ratio = Math.max(1, parseFloat(speedMultiplier) || 2.0);
         const ejs = window.EJS_emulator;
@@ -267,17 +288,24 @@
               toggleFF.call(gm, fastForward ? 1 : 0);
             }
 
-            // CRITICAL: Unbind VSync / rAF when fast-forwarding so Emscripten main loop
-            // switches from rAF (60Hz display lock) to setImmediate (mode 2).
-            // When returning to 1x normal speed, re-enable VSync (mode 1 / rAF).
+            // VSync toggle: Unbind when fast-forwarding or if user disabled VSync
             const setVSync = gm.setVSync || gm.functions?.setVSync;
             if (setVSync) {
-              setVSync.call(gm, fastForward ? 0 : 1);
+              setVSync.call(gm, (fastForward || !userVSyncEnabled) ? 0 : 1);
             }
 
+            // CRITICAL: mGBA libretro mgba_frameskip accepts integers "0" to "10", NOT strings like "auto"
+            // For 1x: "0" (no frameskip, perfectly smooth)
+            // For 2x: "1" (skip 1 frame)
+            // For 3x: "2"
+            // For 5x: "4" (skip 4 frames, render 1 frame -> 80% render reduction -> full 5x speed)
             const setVar = gm.setVariable || gm.functions?.setVariable;
             if (setVar) {
-              setVar.call(gm, 'mgba_frameskip', fastForward ? 'auto' : 'disabled');
+              let fsVal = "0";
+              if (fastForward && ratio > 1.0) {
+                fsVal = Math.min(8, Math.max(1, Math.round(ratio) - 1)).toString();
+              }
+              setVar.call(gm, 'mgba_frameskip', fsVal);
               setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
             }
 
@@ -285,11 +313,10 @@
             // ON at normal speed (so main loop syncs to audio output ~60Hz)
             if (gm.Module && gm.Module.ccall) {
               try {
-                // RetroArch runtime config override via retroarch_set_config_option
                 gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'],
                   ['audio_sync', fastForward ? 'false' : 'true']);
                 gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'],
-                  ['video_vsync', fastForward ? 'false' : 'true']);
+                  ['video_vsync', (fastForward || !userVSyncEnabled) ? 'false' : 'true']);
               } catch (e) {}
             }
           } catch (err) {}
@@ -303,6 +330,19 @@
         } else if (e.data.type === 'EJS_SET_SPEED') {
           pendingSpeed = { fastForward: e.data.fastForward, speedMultiplier: e.data.speedMultiplier };
           applySpeed(e.data.fastForward, e.data.speedMultiplier);
+        } else if (e.data.type === 'EJS_SET_VSYNC') {
+          userVSyncEnabled = !!e.data.enabled;
+          try {
+            const gm = window.EJS_emulator?.gameManager;
+            const setVSync = gm?.setVSync || gm?.functions?.setVSync;
+            if (setVSync) {
+              setVSync.call(gm, (window.EJS_emulator?.isFastForward || !userVSyncEnabled) ? 0 : 1);
+            }
+            if (gm?.Module?.ccall) {
+              gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'],
+                ['video_vsync', (window.EJS_emulator?.isFastForward || !userVSyncEnabled) ? 'false' : 'true']);
+            }
+          } catch (err) {}
         } else if (e.data.type === 'EJS_SET_VOLUME') {
           try {
             const vol = Math.max(0, Math.min(1, parseFloat(e.data.volume) ?? 1.0));
@@ -321,12 +361,7 @@
             }
           } catch (err) {}
         } else if (e.data.type === 'EJS_FLUSH_SAVES') {
-          try {
-            const gm = window.EJS_emulator?.gameManager;
-            if (gm && typeof gm.saveSaveFiles === 'function') {
-              gm.saveSaveFiles();
-            }
-          } catch (err) {}
+          flushSaveToDisk();
         } else if (e.data.type === 'EJS_SET_CHEATS') {
           try {
             const gm = window.EJS_emulator?.gameManager;
@@ -343,16 +378,6 @@
           }
         }
       });
-
-      // Background periodic save flush to IndexedDB every 30 seconds (was 8s — way too frequent)
-      setInterval(() => {
-        try {
-          const gm = window.EJS_emulator?.gameManager;
-          if (gm && typeof gm.saveSaveFiles === 'function') {
-            gm.saveSaveFiles();
-          }
-        } catch (err) {}
-      }, 30000);
 
       // Load loader script
       const script = document.createElement('script');

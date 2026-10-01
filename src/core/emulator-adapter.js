@@ -26,10 +26,11 @@ export class EmulatorAdapter {
     this.romName = 'Chưa chọn ROM';
     this.romTitle = '';
 
-    // Speed
+    // Speed & Sync
     this.speed = 1.0;
     this._fastForward = false;
-    this._speedMultiplier = 2.0;
+    this._speedMultiplier = 1.0;
+    this._vsyncEnabled = true;
 
     // Performance / FPS
     this.fps = 0;
@@ -184,6 +185,8 @@ export class EmulatorAdapter {
     this.running = false;
     this.paused = false;
     this.romLoaded = false;
+    this._fastForward = false;
+    this._speedMultiplier = 1.0;
     this._keyState = {};
     this._audioUnlocked = false;
     if (this._fpsRafId) {
@@ -389,16 +392,44 @@ export class EmulatorAdapter {
 
         const setVSync = gm.setVSync || gm.functions?.setVSync;
         if (setVSync) {
-          setVSync.call(gm, isFF ? 0 : 1);
+          setVSync.call(gm, (isFF || !this._vsyncEnabled) ? 0 : 1);
         }
 
         const setVar = gm.setVariable || gm.functions?.setVariable;
         if (setVar) {
-          setVar.call(gm, 'mgba_frameskip', isFF ? 'auto' : 'disabled');
+          let fsVal = "0";
+          if (isFF && ratio > 1.0) {
+            fsVal = Math.min(8, Math.max(1, Math.round(ratio) - 1)).toString();
+          }
+          setVar.call(gm, 'mgba_frameskip', fsVal);
           setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
         }
       }
     } catch (e) {}
+  }
+
+  setVSync(enabled) {
+    this._vsyncEnabled = !!enabled;
+    try {
+      this.iframe?.contentWindow?.postMessage({
+        type: 'EJS_SET_VSYNC',
+        enabled: this._vsyncEnabled
+      }, '*');
+    } catch (e) {}
+
+    const gm = this._gameManager;
+    if (gm) {
+      try {
+        const setVSync = gm.setVSync || gm.functions?.setVSync;
+        if (setVSync) {
+          setVSync.call(gm, (this._fastForward || !this._vsyncEnabled) ? 0 : 1);
+        }
+        if (gm.Module && gm.Module.ccall) {
+          gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'],
+            ['video_vsync', (this._fastForward || !this._vsyncEnabled) ? 'false' : 'true']);
+        }
+      } catch (e) {}
+    }
   }
 
   // ===== SAVE / LOAD STATE =====

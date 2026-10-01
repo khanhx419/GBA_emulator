@@ -26,7 +26,8 @@ export class GBA {
     // Speed / Fast Forward
     this.speed = 1.0;
     this.fastForward = false;
-    this.speedMultiplier = 2.0;
+    this.speedMultiplier = 1.0;
+    this._vsyncEnabled = true;
 
     // Performance / FPS
     this.fps = 0;
@@ -224,6 +225,10 @@ export class GBA {
     }
 
     this.scheduleNextFrame();
+  }
+
+  setVSync(enabled) {
+    this._vsyncEnabled = !!enabled;
   }
 
   runFrame() {

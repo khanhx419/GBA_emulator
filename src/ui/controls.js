@@ -133,9 +133,10 @@ export class GBAControls {
         return;
       }
 
-      // Hotkeys
       if (e.code === 'Tab') {
         e.preventDefault();
+        const target = parseFloat(localStorage.getItem('myboy_ff_multiplier')) || 2.0;
+        this.gba.speedMultiplier = Math.max(1.5, target);
         this.gba.fastForward = true;
         document.getElementById('btn-fastforward')?.classList.add('active');
         return;
@@ -276,7 +277,13 @@ export class GBAControls {
       ffBtn.addEventListener('click', () => {
         if (this.isEditingLayout) return;
         this.triggerHaptic();
-        this.gba.fastForward = !this.gba.fastForward;
+        if (!this.gba.fastForward) {
+          const target = parseFloat(localStorage.getItem('myboy_ff_multiplier')) || 2.0;
+          this.gba.speedMultiplier = Math.max(1.5, target);
+          this.gba.fastForward = true;
+        } else {
+          this.gba.fastForward = false;
+        }
         ffBtn.classList.toggle('active', this.gba.fastForward);
       });
     }
