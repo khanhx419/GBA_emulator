@@ -38,7 +38,7 @@ class EJS_GameManager {
         this.writeFile("/home/web_user/.config/retroarch/retroarch.cfg", this.getRetroArchCfg());
 
         const mgbaOpt = 'mgba_frameskip = "0"\n' +
-            'mgba_idle_optimization = "Remove Known"\n' +
+            'mgba_idle_optimization = "Detect and Remove"\n' +
             'mgba_interframe_blending = "disabled"\n' +
             'mgba_color_correction = "disabled"\n';
         this.writeFile("/home/web_user/.config/retroarch/retroarch-core-options.cfg", mgbaOpt);
