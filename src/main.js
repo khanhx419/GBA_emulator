@@ -921,7 +921,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // --- VSync Setting ---
   const vsyncToggle = document.getElementById('setting-vsync');
-  const savedVsync = localStorage.getItem('myboy_vsync') !== 'false';
+  const savedVsync = localStorage.getItem('myboy_vsync') === 'true';
   if (vsyncToggle) {
     vsyncToggle.checked = savedVsync;
     gba.setVSync(savedVsync);
@@ -929,7 +929,7 @@ window.addEventListener('DOMContentLoaded', () => {
       const enabled = e.target.checked;
       localStorage.setItem('myboy_vsync', enabled ? 'true' : 'false');
       gba.setVSync(enabled);
-      showAppToast(enabled ? '🔄 Đã bật VSync (60 FPS chuẩn)' : '⚡ Đã tắt VSync (Giảm độ trễ)');
+      showAppToast(enabled ? '🔄 Đã bật VSync (Đồng bộ màn hình)' : '❄️ Đã bật Chế độ Tiết kiệm pin / Mát máy');
     });
   }
 

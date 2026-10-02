@@ -62,72 +62,6 @@
 <body>
   <div id="game"></div>
   <script>
-    // ===== HIGH-PRECISION ACCUMULATOR rAF PACER (FOR 60Hz / 90Hz / 120Hz / 144Hz DISPLAYS) =====
-    // Decouples Emscripten RetroArch main loop from high refresh rate displays and Android TouchBoost.
-    // Locks emulation strictly to GBA 59.7275 Hz to eliminate 100% CPU burn, stuttering & audio lag.
-    window.EJS_isFastForward = false;
-    (function() {
-      const originalRAF = window.requestAnimationFrame.bind(window);
-      const originalCancelRAF = window.cancelAnimationFrame.bind(window);
-      const GBA_FRAME_MS = 1000 / 59.7275; // ~16.7427 ms
-      const TOLERANCE_MS = 1.5; // tolerance for browser microsecond timer jitter
-
-      let lastRafTime = performance.now();
-      let accumulator = 0;
-      let nextId = 1;
-      const callbacks = new Map(); // id -> callback
-
-      function pacerTick(now) {
-        const dt = Math.min(now - lastRafTime, 60); // Cap max dt to 60ms to prevent death spiral
-        lastRafTime = now;
-
-        if (window.EJS_isFastForward) {
-          // Fast-Forward mode: unthrottled, run immediately on every display tick
-          accumulator = 0;
-          if (callbacks.size > 0) {
-            const currentCbs = Array.from(callbacks.entries());
-            callbacks.clear();
-            for (let i = 0; i < currentCbs.length; i++) {
-              try { currentCbs[i][1](now); } catch (e) { console.error(e); }
-            }
-          }
-        } else {
-          // 1x Normal Speed: strictly accumulate time and pace to 59.7275 Hz
-          accumulator += dt;
-
-          // Cap accumulator to avoid huge catch-up bursts after backgrounding/lag
-          if (accumulator > GBA_FRAME_MS * 2.5) {
-            accumulator = GBA_FRAME_MS;
-          }
-
-          if (accumulator >= (GBA_FRAME_MS - TOLERANCE_MS) && callbacks.size > 0) {
-            accumulator -= GBA_FRAME_MS;
-            if (accumulator < 0) accumulator = 0;
-
-            const currentCbs = Array.from(callbacks.entries());
-            callbacks.clear();
-            for (let i = 0; i < currentCbs.length; i++) {
-              try { currentCbs[i][1](now); } catch (e) { console.error(e); }
-            }
-          }
-        }
-
-        originalRAF(pacerTick);
-      }
-
-      originalRAF(pacerTick);
-
-      window.requestAnimationFrame = function(cb) {
-        const id = nextId++;
-        callbacks.set(id, cb);
-        return id;
-      };
-
-      window.cancelAnimationFrame = function(id) {
-        callbacks.delete(id);
-      };
-    })();
-
     // Proactively remove any virtual gamepad & message elements injected by EmulatorJS
     // Use a simple class list check instead of querySelectorAll on every mutation
     let cleanupActive = true;
@@ -166,7 +100,7 @@
       window.EJS_defaultOptions = {
         'virtual-gamepad': 'disabled',
         'menu-bar-button': 'hidden',
-        'vsync': 'enabled',
+        'vsync': 'disabled',
         'save-save-interval': '0'
       };
 
@@ -245,7 +179,7 @@
             const setVar = gm.setVariable || gm.functions?.setVariable;
             if (setVar) {
               setVar.call(gm, 'mgba_frameskip', '0');
-              setVar.call(gm, 'mgba_idle_optimization', 'Detect and Remove');
+              setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
               setVar.call(gm, 'mgba_interframe_blending', 'disabled');
               setVar.call(gm, 'mgba_color_correction', 'disabled');
             }
@@ -278,7 +212,7 @@
 
       let pendingSpeed = null;
 
-      let userVSyncEnabled = true;
+      let userVSyncEnabled = false;
 
       function flushSaveToDisk() {
         try {
@@ -343,7 +277,7 @@
                 fsVal = Math.min(8, Math.max(1, Math.round(ratio) - 1)).toString();
               }
               setVar.call(gm, 'mgba_frameskip', fsVal);
-              setVar.call(gm, 'mgba_idle_optimization', 'Detect and Remove');
+              setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
             }
 
             // Toggle audio_sync: OFF during fast-forward (so audio doesn't throttle CPU),

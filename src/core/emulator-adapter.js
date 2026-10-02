@@ -113,7 +113,7 @@ export class EmulatorAdapter {
           this.setVolume(parseFloat(savedVol));
         }
 
-        const savedVsync = localStorage.getItem('myboy_vsync') !== 'false';
+        const savedVsync = localStorage.getItem('myboy_vsync') === 'true';
         this.setVSync(savedVsync);
 
         this._applySpeed();
@@ -405,7 +405,7 @@ export class EmulatorAdapter {
             fsVal = Math.min(8, Math.max(1, Math.round(ratio) - 1)).toString();
           }
           setVar.call(gm, 'mgba_frameskip', fsVal);
-          setVar.call(gm, 'mgba_idle_optimization', 'Detect and Remove');
+          setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
         }
       }
     } catch (e) {}
