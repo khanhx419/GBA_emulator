@@ -508,12 +508,36 @@ export class EmulatorAdapter {
     return await saveStateManager.deleteAllStates(this.romTitle);
   }
 
-  // ===== MEMORY ACCESS FOR SCANNER =====
+  // ===== HIGH-PERFORMANCE DIRECT WASM MEMORY ACCESS =====
+
+  _getMemoryBases() {
+    try {
+      const cw = this.iframe?.contentWindow;
+      if (cw && typeof cw.EJS_getMemoryBases === 'function') {
+        return cw.EJS_getMemoryBases();
+      }
+    } catch (e) {}
+    return { ewramBase: 0x5bda98, iwramBase: 0x5fda98 };
+  }
 
   getMemorySnapshot() {
     const gm = this._gameManager;
     if (!this.romLoaded || !gm) return null;
     try {
+      const heapU8 = gm.Module?.HEAPU8;
+      if (heapU8) {
+        const { ewramBase, iwramBase } = this._getMemoryBases();
+        if (ewramBase >= 0 && ewramBase + 0x40000 <= heapU8.length &&
+            iwramBase >= 0 && iwramBase + 0x8000 <= heapU8.length) {
+          return {
+            ewram: heapU8.subarray(ewramBase, ewramBase + 0x40000),
+            iwram: heapU8.subarray(iwramBase, iwramBase + 0x8000),
+            fullState: null
+          };
+        }
+      }
+
+      // Fallback: saveStateInfo
       let state = null;
       if (typeof gm.getState === 'function') {
         state = gm.getState();
@@ -528,8 +552,6 @@ export class EmulatorAdapter {
       }
 
       if (state && state.length >= 0x61000) {
-        // EWRAM starts at 0x21000, length 0x40000 (256KB)
-        // IWRAM starts at 0x19000, length 0x8000 (32KB)
         return {
           ewram: state.subarray(0x21000, 0x21000 + 0x40000),
           iwram: state.subarray(0x19000, 0x19000 + 0x8000),
@@ -543,9 +565,35 @@ export class EmulatorAdapter {
   }
 
   readMemory(addr, type = 'u16', cachedSnapshot = null) {
+    // 1. Direct iframe memory read (instant, zero overhead)
+    try {
+      const cw = this.iframe?.contentWindow;
+      if (cw && typeof cw.EJS_readMemory === 'function') {
+        return cw.EJS_readMemory(addr, type);
+      }
+    } catch (e) {}
+
+    // 2. Direct HEAPU8 read
+    const gm = this._gameManager;
+    const heapU8 = gm?.Module?.HEAPU8;
+    if (heapU8) {
+      const { ewramBase, iwramBase } = this._getMemoryBases();
+      let ptr = -1;
+      if (addr >= 0x02000000 && addr < 0x02040000) {
+        ptr = ewramBase + (addr & 0x3FFFF);
+      } else if (addr >= 0x03000000 && addr < 0x03008000) {
+        ptr = iwramBase + (addr & 0x7FFF);
+      }
+      if (ptr !== -1 && ptr + 4 <= heapU8.length) {
+        if (type === 'u8') return heapU8[ptr];
+        if (type === 'u16') return heapU8[ptr] | (heapU8[ptr + 1] << 8);
+        if (type === 'u32') return (heapU8[ptr] | (heapU8[ptr + 1] << 8) | (heapU8[ptr + 2] << 16) | (heapU8[ptr + 3] << 24)) >>> 0;
+      }
+    }
+
+    // 3. Fallback snapshot read
     const snap = cachedSnapshot || this.getMemorySnapshot();
     if (!snap) return 0;
-
     let buf = null;
     let offset = 0;
     if (addr >= 0x02000000 && addr < 0x02040000) {
@@ -556,54 +604,52 @@ export class EmulatorAdapter {
       offset = addr - 0x03000000;
     }
     if (!buf || offset < 0 || offset >= buf.length) return 0;
-
-    if (type === 'u8') {
-      return buf[offset];
-    } else if (type === 'u16') {
-      return buf[offset] | (buf[offset + 1] << 8);
-    } else if (type === 'u32') {
-      return (buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24)) >>> 0;
-    }
+    if (type === 'u8') return buf[offset];
+    if (type === 'u16') return buf[offset] | (buf[offset + 1] << 8);
+    if (type === 'u32') return (buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24)) >>> 0;
     return 0;
   }
 
   writeMemory(addr, val, type = 'u16') {
-    const gm = this._gameManager;
-    if (!this.romLoaded || !gm) return false;
+    val = Number(val);
+    if (val > 65535 && type !== 'u32') type = 'u32';
+
+    // 1. Direct iframe poke (instant, zero overhead)
     try {
-      const snap = this.getMemorySnapshot();
-      if (!snap) return false;
-      const state = snap.fullState;
-
-      let targetOffset = -1;
-      if (addr >= 0x02000000 && addr < 0x02040000) {
-        targetOffset = 0x21000 + (addr - 0x02000000);
-      } else if (addr >= 0x03000000 && addr < 0x03008000) {
-        targetOffset = 0x19000 + (addr - 0x03000000);
+      const cw = this.iframe?.contentWindow;
+      if (cw && typeof cw.EJS_pokeMemory === 'function') {
+        const ok = cw.EJS_pokeMemory(addr, val, type);
+        if (ok) return true;
       }
+    } catch (e) {}
 
-      if (targetOffset !== -1) {
-        val = Number(val);
-        if (val > 65535 && type !== 'u32') {
-          type = 'u32';
-        }
+    // 2. Direct HEAPU8 poke
+    const gm = this._gameManager;
+    const heapU8 = gm?.Module?.HEAPU8;
+    if (heapU8) {
+      const { ewramBase, iwramBase } = this._getMemoryBases();
+      let ptr = -1;
+      if (addr >= 0x02000000 && addr < 0x02040000) {
+        ptr = ewramBase + (addr & 0x3FFFF);
+      } else if (addr >= 0x03000000 && addr < 0x03008000) {
+        ptr = iwramBase + (addr & 0x7FFF);
+      }
+      if (ptr !== -1 && ptr + 4 <= heapU8.length) {
         if (type === 'u8') {
-          state[targetOffset] = val & 0xFF;
+          heapU8[ptr] = val & 0xFF;
         } else if (type === 'u16') {
-          state[targetOffset] = val & 0xFF;
-          state[targetOffset + 1] = (val >> 8) & 0xFF;
+          heapU8[ptr] = val & 0xFF;
+          heapU8[ptr + 1] = (val >> 8) & 0xFF;
         } else if (type === 'u32') {
-          state[targetOffset] = val & 0xFF;
-          state[targetOffset + 1] = (val >> 8) & 0xFF;
-          state[targetOffset + 2] = (val >> 16) & 0xFF;
-          state[targetOffset + 3] = (val >>> 24) & 0xFF;
+          heapU8[ptr] = val & 0xFF;
+          heapU8[ptr + 1] = (val >> 8) & 0xFF;
+          heapU8[ptr + 2] = (val >> 16) & 0xFF;
+          heapU8[ptr + 3] = (val >>> 24) & 0xFF;
         }
-        gm.loadState(state);
         return true;
       }
-    } catch (e) {
-      console.warn('[EmulatorAdapter] writeMemory error:', e);
     }
+
     return false;
   }
 
@@ -635,7 +681,9 @@ export class EmulatorAdapter {
         }
       },
       loadFromStorage() { self._loadCheatsFromStorage(); },
-      applyCheats() {}
+      applyCheats() {
+        self._applyCheatsToEJS();
+      }
     };
   }
 
@@ -721,7 +769,15 @@ export class EmulatorAdapter {
       }
     }
 
-    // 3. Post to iframe via postMessage for cross-frame reliability
+    // 3. Directly call EJS_setActiveCheats on iframe contentWindow if accessible
+    try {
+      const cw = this.iframe?.contentWindow;
+      if (cw && typeof cw.EJS_setActiveCheats === 'function') {
+        cw.EJS_setActiveCheats(codes);
+      }
+    } catch (e) {}
+
+    // 4. Post to iframe via postMessage for cross-frame reliability
     try {
       this.iframe?.contentWindow?.postMessage({
         type: 'EJS_SET_CHEATS',
@@ -729,7 +785,7 @@ export class EmulatorAdapter {
       }, '*');
     } catch (e) {}
 
-    // 4. Also call directly on gameManager if accessible
+    // 5. Also register on gameManager if supported
     const gm = this._gameManager;
     if (gm && typeof gm.setCheat === 'function') {
       try {
@@ -737,9 +793,7 @@ export class EmulatorAdapter {
         for (let idx = 0; idx < codes.length; idx++) {
           gm.setCheat(idx, 1, codes[idx]);
         }
-      } catch (e) {
-        console.warn('[GBA_K] Direct setCheat error:', e);
-      }
+      } catch (e) {}
     }
   }
 
@@ -1267,7 +1321,7 @@ export class EmulatorAdapter {
     const self = this;
     return {
       get rom() { return new Uint8Array(0); },
-      get romSize() { return 0; },
+      get romSize() { return self.romLoaded ? (self.romSize || 33554432) : 0; },
       get ewram() {
         const snap = self.getMemorySnapshot();
         return snap ? snap.ewram : new Uint8Array(0x40000);
