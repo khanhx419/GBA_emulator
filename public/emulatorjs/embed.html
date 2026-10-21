@@ -101,7 +101,8 @@
         'virtual-gamepad': 'disabled',
         'menu-bar-button': 'hidden',
         'vsync': 'disabled',
-        'save-save-interval': '0'
+        'save-save-interval': '0',
+        'audio-sync': 'disabled'
       };
 
       window.EJS_Buttons = {
@@ -179,9 +180,14 @@
             const setVar = gm.setVariable || gm.functions?.setVariable;
             if (setVar) {
               setVar.call(gm, 'mgba_frameskip', '0');
-              setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
+              setVar.call(gm, 'mgba_idle_optimization', "Don't Remove");
               setVar.call(gm, 'mgba_interframe_blending', 'disabled');
               setVar.call(gm, 'mgba_color_correction', 'disabled');
+              if (gm.Module && gm.Module.ccall) {
+                try {
+                  gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'], ['audio_sync', 'false']);
+                } catch (e) {}
+              }
             }
           }
           if (pendingSpeed) {
@@ -277,7 +283,7 @@
                 fsVal = Math.min(8, Math.max(1, Math.round(ratio) - 1)).toString();
               }
               setVar.call(gm, 'mgba_frameskip', fsVal);
-              setVar.call(gm, 'mgba_idle_optimization', 'Remove Known');
+              setVar.call(gm, 'mgba_idle_optimization', "Don't Remove");
             }
 
             // Toggle audio_sync: OFF during fast-forward (so audio doesn't throttle CPU),
