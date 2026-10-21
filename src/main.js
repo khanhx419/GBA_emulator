@@ -206,7 +206,7 @@ window.addEventListener('DOMContentLoaded', () => {
     let html = '';
     for (let slot = 1; slot <= 6; slot++) {
       const info = gba.getStateInfo(slot);
-      const thumb = info && info.screenshot ? info.screenshot : '';
+      const thumb = info && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(info.screenshot) ? info.screenshot : '';
       const timeStr = info ? new Date(info.timestamp).toLocaleTimeString() : 'Trống';
 
       html += `
@@ -337,43 +337,7 @@ window.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // If no ROM currently running, try to find matching ROM in library
-        try {
-          const roms = await library.getAllRoms();
-          const baseName = file.name.replace(/\.[^/.]+$/, '').toLowerCase();
-          let matchedRom = roms.find(r => {
-            const rName = r.name.toLowerCase();
-            return rName.includes(baseName) || baseName.includes(r.name.replace(/\.[^/.]+$/, '').toLowerCase());
-          });
-
-          if (!matchedRom && roms.length > 0) {
-            const lastPlayed = localStorage.getItem('gba_k_last_played_rom');
-            matchedRom = roms.find(r => r.name === lastPlayed) || roms[0];
-          }
-
-          if (matchedRom && matchedRom.data) {
-            showAppToast(`🎮 Đang mở game ${matchedRom.name} với file save vừa nạp...`);
-            const title = matchedRom.name.replace(/\.[^/.]+$/, '').trim();
-            let binary = '';
-            const u8 = new Uint8Array(savBuf);
-            for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
-            try {
-              localStorage.setItem('gba_sav_backup_' + title, btoa(binary));
-            } catch (err) {}
-            if (gba._currentSaveData !== undefined) {
-              gba._currentSaveData = u8;
-            }
-            handleLoadRom(matchedRom.data, matchedRom.name);
-            closeAllModals();
-            return;
-          }
-        } catch (err) {
-          console.warn('Match ROM on sav import error:', err);
-        }
-
-        await gba.importSavFile(savBuf, file.name);
-        closeAllModals();
-        showAppToast('📥 Đã lưu file .SAV! Vui lòng mở file ROM game (.gba) từ Thư viện để bắt đầu.');
+        showAppToast('⚠️ Hãy mở đúng ROM trước khi nạp SAV để tránh ghi nhầm game.');
       };
       reader.readAsArrayBuffer(file);
     }
@@ -405,7 +369,7 @@ window.addEventListener('DOMContentLoaded', () => {
       const fileName = `GBA_K_Backup_${romTitle || 'all'}_${dateStr}.json`;
       const ok = downloadFile(fileName, new TextEncoder().encode(jsonStr), 'application/json');
       if (ok) {
-        const savNote = backup.batterySave ? ' + File .SAV' : '';
+        const savNote = backup.batterySaveBase64 ? ' + File .SAV' : '';
         showAppToast(`📦 Đã sao lưu ${backup.states.length} slot${savNote} vào ${fileName}!`);
       }
     } catch (e) {
@@ -420,18 +384,26 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   backupFileInput?.addEventListener('change', () => {
+    if (!gba.romLoaded) {
+      showAppToast('⚠️ Hãy mở đúng ROM trước khi nhập backup.');
+      backupFileInput.value = '';
+      return;
+    }
     if (backupFileInput.files.length > 0) {
       const file = backupFileInput.files[0];
       const reader = new FileReader();
       reader.onload = async (e) => {
         try {
-          const res = await saveStateManager.importBackup(e.target.result);
+          const sessionId = gba._sessionId;
+          const res = await saveStateManager.importBackup(e.target.result, gba.romTitle, gba.getRomChecksum());
+          if (sessionId !== gba._sessionId) throw new Error('ROM đã thay đổi; hãy mở đúng game trước khi nạp SAV.');
           const details = [];
           if (res.count > 0) details.push(`${res.count} Save State`);
           if (res.batterySave) {
-            await gba.importSavFile(res.batterySave);
-            details.push('File .SAV');
+            if (await gba.importSavFile(res.batterySave)) details.push('File .SAV');
+            else throw new Error('Đã nhập state nhưng chưa nạp được SAV. Hãy mở đúng ROM và thử lại.');
           }
+          gba.cheats.loadFromStorage();
           if (details.length > 0) {
             showAppToast(`📥 Đã khôi phục thành công: ${details.join(', ')}!`);
             renderSaveSlots();
@@ -450,6 +422,9 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- Cheats Manager ---
+  const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[character]);
   const renderCheatsList = () => {
     const list = document.getElementById('cheats-list');
     if (!list) return;
@@ -462,12 +437,12 @@ window.addEventListener('DOMContentLoaded', () => {
     list.innerHTML = gba.cheats.cheats.map(c => `
       <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.04); padding:8px 12px; border-radius:6px; border:1px solid var(--glass-border);">
         <div>
-          <div style="font-weight:600; font-size:0.9rem;">${c.name}</div>
-          <code style="font-size:0.75rem; color:var(--accent-cyan);">${c.code.replace(/\n/g, ' ')}</code>
+          <div style="font-weight:600; font-size:0.9rem;">${escapeHtml(c.name)}</div>
+          <code style="font-size:0.75rem; color:var(--accent-cyan);">${escapeHtml(c.code.replace(/\n/g, ' '))}</code>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
-          <input type="checkbox" class="toggle-cheat" data-id="${c.id}" ${c.enabled ? 'checked' : ''} style="transform: scale(1.2); accent-color: var(--accent-cyan);" />
-          <button class="btn-delete-cheat" data-id="${c.id}" style="background:transparent; border:none; color:#ff4444; cursor:pointer;">✕</button>
+          <input type="checkbox" class="toggle-cheat" data-id="${escapeHtml(c.id)}" ${c.enabled ? 'checked' : ''} style="transform: scale(1.2); accent-color: var(--accent-cyan);" />
+          <button class="btn-delete-cheat" data-id="${escapeHtml(c.id)}" style="background:transparent; border:none; color:#ff4444; cursor:pointer;">✕</button>
         </div>
       </div>
     `).join('');
@@ -515,7 +490,8 @@ window.addEventListener('DOMContentLoaded', () => {
         const lines = codeVal.split(/[\r\n]+/);
         codeVal = lines.map(line => gba.normalizeGbaCheatLine(line) || line.trim()).join('\n');
       }
-      gba.cheats.addCheat(nameInput.value, codeVal);
+      try { gba.cheats.addCheat(nameInput.value, codeVal); }
+      catch (error) { showAppToast('❌ ' + error.message); return; }
       nameInput.value = '';
       codeInput.value = '';
       renderCheatsList();

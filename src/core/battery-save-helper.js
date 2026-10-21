@@ -51,22 +51,16 @@ export async function writeSavToIndexedDB(romTitle, romFileName, u8Data, extraPa
             `/data/saves/${safeTitle}.sav`,
             `/data/saves/${baseName}.srm`,
             `/data/saves/${baseName}.sav`,
-            `/data/saves/game.srm`,
-            `/data/saves/game.sav`,
             ...(Array.isArray(extraPaths) ? extraPaths.filter(Boolean) : [])
           ]);
 
-          paths.forEach(p => {
-            try {
-              store.put(entry, p);
-            } catch (err) {}
-          });
+          paths.forEach(p => store.put(entry, p));
 
           tx.oncomplete = () => {
             db.close();
             resolve(true);
           };
-          tx.onerror = () => {
+          tx.onabort = tx.onerror = () => {
             db.close();
             resolve(false);
           };
@@ -92,6 +86,13 @@ export async function readSavFromIndexedDB(romTitle, romFileName, extraPaths = [
   return new Promise((resolve) => {
     try {
       const req = indexedDB.open(IDBFS_DB_NAME, IDBFS_DB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        const store = db.objectStoreNames.contains(IDBFS_STORE_NAME)
+          ? req.transaction.objectStore(IDBFS_STORE_NAME) : db.createObjectStore(IDBFS_STORE_NAME);
+        if (!store.indexNames.contains('timestamp')) store.createIndex('timestamp', 'timestamp', { unique: false });
+      };
+      req.onblocked = () => resolve(null);
       req.onsuccess = (e) => {
         const db = e.target.result;
         if (!db.objectStoreNames.contains(IDBFS_STORE_NAME)) {
@@ -111,8 +112,6 @@ export async function readSavFromIndexedDB(romTitle, romFileName, extraPaths = [
             `/data/saves/${baseName}.srm`,
             `/data/saves/${safeTitle}.sav`,
             `/data/saves/${baseName}.sav`,
-            `/data/saves/game.srm`,
-            `/data/saves/game.sav`
           ];
 
           let found = null;

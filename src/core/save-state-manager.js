@@ -35,13 +35,15 @@ export class SaveStateManager {
         };
         req.onsuccess = async (e) => {
           this.db = e.target.result;
-          await this._loadAllMeta();
+          this.db.onversionchange = () => { this.db?.close(); this.db = null; };
+          try { await this._loadAllMeta(); } catch (error) {}
           resolve(this.db);
         };
         req.onerror = (e) => {
           console.warn('[SaveStateManager] IndexedDB open error:', e);
           resolve(null);
         };
+        req.onblocked = () => resolve(null);
       } catch (err) {
         console.warn('[SaveStateManager] IndexedDB initialization failed:', err);
         resolve(null);
@@ -59,6 +61,7 @@ export class SaveStateManager {
     return new Promise((resolve) => {
       try {
         const tx = this.db.transaction('states', 'readonly');
+        tx.onabort = tx.onerror = () => resolve();
         const store = tx.objectStore('states');
         const req = store.openCursor();
         req.onsuccess = (e) => {
@@ -81,16 +84,18 @@ export class SaveStateManager {
     });
   }
 
-  async saveState(romTitle, slot, stateData, screenshot) {
+  async saveState(romTitle, slot, stateData, screenshot, timestamp = Date.now()) {
     await this._initPromise;
+    if (typeof romTitle !== 'string' || !romTitle || !Number.isSafeInteger(slot) || slot < 1 || slot > 999) return null;
+    const bytes = stateData instanceof Uint8Array ? new Uint8Array(stateData) : new Uint8Array(stateData);
+    if (!bytes.length || bytes.length > 16 * 1024 * 1024) return null;
     const key = this._getKey(romTitle, slot);
     const meta = {
-      timestamp: Date.now(),
-      screenshot: screenshot || null
+      timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),
+      screenshot: this._safeScreenshot(screenshot)
     };
 
     // Update in-memory cache for instant UI response
-    this._metaCache.set(key, meta);
 
     // 1. Primary: Save to IndexedDB (virtually unlimited quota)
     if (this.db) {
@@ -98,7 +103,7 @@ export class SaveStateManager {
         try {
           const tx = this.db.transaction('states', 'readwrite');
           const store = tx.objectStore('states');
-          const u8 = stateData instanceof Uint8Array ? stateData : new Uint8Array(stateData);
+          const u8 = bytes;
           const item = {
             key,
             romTitle,
@@ -108,7 +113,8 @@ export class SaveStateManager {
             state: u8
           };
           const putReq = store.put(item);
-          putReq.onsuccess = () => resolve(true);
+          tx.oncomplete = () => resolve(true);
+          tx.onabort = tx.onerror = () => resolve(false);
           putReq.onerror = (err) => {
             console.warn('[SaveStateManager] IndexedDB put error:', err);
             resolve(false);
@@ -120,12 +126,14 @@ export class SaveStateManager {
       });
 
       if (saved) {
+        this._metaCache.set(key, meta);
         // Clean up legacy localStorage if present to free space
         try {
           localStorage.removeItem(`myboy_savestate_${romTitle}_slot${slot}`);
         } catch (e) {}
         return { key, ...meta, state: stateData };
       }
+      return null;
     }
 
     // 2. Fallback to localStorage only if IndexedDB is unavailable
@@ -135,9 +143,10 @@ export class SaveStateManager {
         romTitle,
         timestamp: meta.timestamp,
         screenshot: meta.screenshot,
-        state: Array.from(stateData)
+        state: Array.from(bytes)
       };
       localStorage.setItem(`myboy_savestate_${romTitle}_slot${slot}`, JSON.stringify(stateObj));
+      this._metaCache.set(key, meta);
       return stateObj;
     } catch (e) {
       console.warn('[SaveStateManager] LocalStorage quota exceeded:', e);
@@ -180,7 +189,7 @@ export class SaveStateManager {
         if (parsed.state) {
           const u8 = new Uint8Array(parsed.state);
           // Auto-migrate to IndexedDB
-          this.saveState(romTitle, slot, u8, parsed.screenshot).catch(() => {});
+          this.saveState(romTitle, slot, u8, parsed.screenshot, parsed.timestamp).catch(() => {});
           return {
             state: u8,
             timestamp: parsed.timestamp,
@@ -216,35 +225,39 @@ export class SaveStateManager {
   async deleteState(romTitle, slot) {
     await this._initPromise;
     const key = this._getKey(romTitle, slot);
-    this._metaCache.delete(key);
 
     if (this.db) {
-      await new Promise((resolve) => {
+      const deleted = await new Promise((resolve) => {
         try {
           const tx = this.db.transaction('states', 'readwrite');
           const store = tx.objectStore('states');
           const req = store.delete(key);
-          req.onsuccess = () => resolve(true);
+          tx.oncomplete = () => resolve(true);
+          tx.onabort = tx.onerror = () => resolve(false);
           req.onerror = () => resolve(false);
         } catch (e) {
           resolve(false);
         }
       });
+      if (!deleted) return false;
     }
 
     try {
       localStorage.removeItem(`myboy_savestate_${romTitle}_slot${slot}`);
-    } catch (e) {}
+    } catch (e) { return false; }
 
+    this._metaCache.delete(key);
     return true;
   }
 
   async deleteAllStates(romTitle) {
     await this._initPromise;
-    for (let slot = 1; slot <= 10; slot++) {
-      await this.deleteState(romTitle, slot);
+    const backup = await this.exportBackup(romTitle);
+    let success = true;
+    for (const item of backup.states) {
+      if (!await this.deleteState(item.romTitle, item.slot)) success = false;
     }
-    return true;
+    return success;
   }
 
   async exportBackup(romTitle, batterySaveU8 = null) {
@@ -265,7 +278,7 @@ export class SaveStateManager {
 
     // 1. Collect states from IndexedDB
     if (this.db) {
-      await new Promise((resolve) => {
+      await new Promise((resolve, reject) => {
         try {
           const tx = this.db.transaction('states', 'readonly');
           const store = tx.objectStore('states');
@@ -274,8 +287,7 @@ export class SaveStateManager {
             const cursor = e.target.result;
             if (cursor) {
               const val = cursor.value;
-              const safeTitle = (romTitle || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
-              if (!romTitle || val.romTitle === romTitle || val.key.includes(safeTitle) || val.key.includes(romTitle)) {
+              if (!romTitle || val.romTitle === romTitle) {
                 backup.states.push({
                   key: val.key,
                   romTitle: val.romTitle,
@@ -290,12 +302,29 @@ export class SaveStateManager {
               resolve();
             }
           };
-          req.onerror = () => resolve();
+          tx.onabort = tx.onerror = () => reject(tx.error || new Error('Không đọc được các slot đã lưu.'));
+          req.onerror = () => reject(req.error || new Error('Không đọc được các slot đã lưu.'));
         } catch (e) {
-          resolve();
+          reject(e);
         }
       });
     }
+
+    try {
+      const existingKeys = new Set(backup.states.map(item => item.key));
+      for (let index = 0; index < localStorage.length; index++) {
+        const storageKey = localStorage.key(index);
+        const match = /^myboy_savestate_(.+)_slot(\d+)$/.exec(storageKey);
+        if (!match || (romTitle && match[1] !== romTitle)) continue;
+        const parsed = JSON.parse(localStorage.getItem(storageKey));
+        const slot = Number(match[2]);
+        const key = this._getKey(match[1], slot);
+        if (!existingKeys.has(key) && Array.isArray(parsed.state) && parsed.state.length) {
+          backup.states.push({ key, romTitle: match[1], slot, timestamp: parsed.timestamp,
+            screenshot: parsed.screenshot, stateBase64: this._uint8ToBase64(parsed.state) });
+        }
+      }
+    } catch (error) {}
 
     // 2. Include cheats
     try {
@@ -306,33 +335,70 @@ export class SaveStateManager {
     return backup;
   }
 
-  async importBackup(backupData) {
+  async importBackup(backupData, expectedRomTitle = null, expectedRomCrc32 = null) {
     await this._initPromise;
     const data = typeof backupData === 'string' ? JSON.parse(backupData) : backupData;
-    if (!data) return { count: 0, batterySave: null };
+    if (!data || data.app !== 'GBA_K' || data.version !== 2 || !Array.isArray(data.states) || data.states.length > 999) {
+      throw new Error('Định dạng backup GBA_K không hợp lệ.');
+    }
+    if (expectedRomTitle && data.romTitle !== expectedRomTitle) throw new Error('Backup thuộc game khác.');
+    const keys = new Set();
+    const prepared = data.states.map(item => {
+      if (!item || !Number.isSafeInteger(item.slot) || item.slot < 1 || item.slot > 999) throw new Error('Slot không hợp lệ.');
+      const romTitle = item.romTitle || data.romTitle;
+      if (typeof romTitle !== 'string' || !romTitle || (expectedRomTitle && romTitle !== expectedRomTitle)) throw new Error('Tên ROM không hợp lệ.');
+      const key = this._getKey(romTitle, item.slot);
+      if (keys.has(key)) throw new Error('Backup chứa slot trùng lặp.');
+      keys.add(key);
+      const state = this._base64ToUint8(item.stateBase64);
+      if (!state.length || state.length > 16 * 1024 * 1024) throw new Error('Dữ liệu state không hợp lệ.');
+      const memory = globalThis.GBAKMemory?.stateMemory(state);
+      if (!memory || (expectedRomCrc32 !== null && memory.romCrc32 !== expectedRomCrc32)) throw new Error('State bị hỏng hoặc thuộc phiên bản ROM khác.');
+      return { ...item, key, romTitle, state, screenshot: this._safeScreenshot(item.screenshot) };
+    });
+    const batterySave = data.batterySaveBase64 ? this._base64ToUint8(data.batterySaveBase64) : null;
+    if (batterySave && (!batterySave.length || batterySave.length > 1024 * 1024)) throw new Error('Dữ liệu SAV không hợp lệ.');
+    const cheats = typeof data.cheats === 'string' ? JSON.parse(data.cheats) : data.cheats;
+    if (cheats != null && (!Array.isArray(cheats) || cheats.some(cheat => !cheat || typeof cheat.code !== 'string' || typeof cheat.id !== 'string'))) {
+      throw new Error('Danh sách cheat không hợp lệ.');
+    }
 
     let importedCount = 0;
-    if (Array.isArray(data.states)) {
-      for (const item of data.states) {
-        if (item.stateBase64) {
-          const u8 = this._base64ToUint8(item.stateBase64);
-          await this.saveState(item.romTitle || data.romTitle, item.slot, u8, item.screenshot);
-          importedCount++;
-        }
+    if (this.db && prepared.length) {
+      await new Promise((resolve, reject) => {
+        const transaction = this.db.transaction('states', 'readwrite');
+        transaction.oncomplete = resolve;
+        transaction.onabort = transaction.onerror = () => reject(transaction.error || new Error('Không thể lưu backup.'));
+        const store = transaction.objectStore('states');
+        for (const item of prepared) store.put(item);
+      });
+      for (const item of prepared) {
+        this._metaCache.set(item.key, { timestamp: item.timestamp, screenshot: item.screenshot });
+        try { localStorage.removeItem(`myboy_savestate_${item.romTitle}_slot${item.slot}`); } catch (error) {}
       }
+      importedCount = prepared.length;
+    } else {
+      const previous = new Map();
+      try {
+        for (const item of prepared) {
+          const key = `myboy_savestate_${item.romTitle}_slot${item.slot}`;
+          previous.set(key, localStorage.getItem(key));
+          localStorage.setItem(key, JSON.stringify({ ...item, state: Array.from(item.state), version: 2 }));
+        }
+      } catch (error) {
+        for (const [key, value] of previous) {
+          try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch (restoreError) {}
+        }
+        throw error;
+      }
+      for (const item of prepared) this._metaCache.set(item.key, { timestamp: item.timestamp, screenshot: item.screenshot });
+      importedCount = prepared.length;
     }
 
-    if (data.cheats && (data.romTitle || data.romTitle)) {
+    if (cheats && data.romTitle) {
       try {
         const key = 'myboy_cheats_' + (data.romTitle || 'default');
-        localStorage.setItem(key, typeof data.cheats === 'string' ? data.cheats : JSON.stringify(data.cheats));
-      } catch (e) {}
-    }
-
-    let batterySave = null;
-    if (data.batterySaveBase64) {
-      try {
-        batterySave = this._base64ToUint8(data.batterySaveBase64);
+        localStorage.setItem(key, JSON.stringify(cheats));
       } catch (e) {}
     }
 
@@ -354,7 +420,12 @@ export class SaveStateManager {
     return btoa(binary);
   }
 
+  _safeScreenshot(value) {
+    return typeof value === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value) ? value : null;
+  }
+
   _base64ToUint8(b64) {
+    if (typeof b64 !== 'string' || !b64 || b64.length > 24 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) throw new Error('Dữ liệu base64 không hợp lệ.');
     const binary = atob(b64);
     const len = binary.length;
     const bytes = new Uint8Array(len);

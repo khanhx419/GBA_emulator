@@ -1,5 +1,16 @@
 # GBA_emulator
 
+## Độ an toàn của cheat và dữ liệu lưu
+
+- Cheat và đóng băng RAM dùng lõi mGBA; không ghi đồng thời bằng vòng lặp riêng.
+- Địa chỉ RAM WASM chỉ được dùng sau khi đối chiếu đủ EWRAM và IWRAM với state. Không tìm được địa chỉ đáng tin cậy thì từ chối ghi.
+- Giữ nguyên độ rộng u8/u16/u32 khi sửa RAM. Giá trị vượt giới hạn hoặc ghi vượt vùng nhớ sẽ bị từ chối.
+- Mở đúng ROM trước khi nhập SAV hoặc backup. State được kiểm tra CRC để tránh nạp nhầm phiên bản ROM có cùng tên, ví dụ Radical Red 4.0 và 4.1.
+- Cheat cũ chưa có dấu nhận diện ROM được giữ lại nhưng tắt khi mở game. Kiểm tra mã đúng phiên bản rồi bật lại; danh sách đóng băng cũ chưa xác minh không tự áp dụng.
+- Backup bao gồm cả slot lưu dự phòng bằng localStorage. Nhập backup kiểm tra dữ liệu trước khi ghi; các slot IndexedDB được nhập trong cùng một giao dịch.
+- Xuất backup định kỳ và Save trong game trước khi thử cheat. Các kiểm tra này không bảo đảm mã cheat của ROM khác sẽ dùng được, cũng không tự sửa mọi state đã hỏng.
+
+
 🎮 **GBA_K Emulator** - Trình giả lập Game Boy Advance hiện đại chạy trên Web và Android (APK).
 
 ---

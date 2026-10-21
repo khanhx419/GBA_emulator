@@ -11,6 +11,7 @@
 import { saveStateManager } from './save-state-manager.js';
 import { downloadFile } from './download-helper.js';
 import { writeSavToIndexedDB, readSavFromIndexedDB } from './battery-save-helper.js';
+import { deleteBatteryFiles } from './delete-battery-save.js';
 
 export class EmulatorAdapter {
   constructor(canvas) {
@@ -45,6 +46,7 @@ export class EmulatorAdapter {
 
     // Pending ROM config for iframe handshake
     this._pendingGameConfig = null;
+    this._sessionId = 0;
 
     // Input state caching to prevent bridge flooding on touchmove
     this._keyState = {};
@@ -80,7 +82,9 @@ export class EmulatorAdapter {
 
   _setupMessageListener() {
     window.addEventListener('message', (event) => {
+      if (event.source !== this.iframe?.contentWindow) return;
       if (!event.data || typeof event.data !== 'object') return;
+      if (event.data.sessionId !== String(this._sessionId)) return;
 
       if (event.data.type === 'EJS_IFRAME_READY') {
         if (this._pendingGameConfig && this.iframe && this.iframe.contentWindow) {
@@ -108,12 +112,14 @@ export class EmulatorAdapter {
         this._loadCheatsFromStorage();
         this.loadFreezeList();
 
-        const savedVol = localStorage.getItem('gba_k_volume');
+        let savedVol = null;
+        try { savedVol = localStorage.getItem('gba_k_volume'); } catch (e) {}
         if (savedVol !== null) {
           this.setVolume(parseFloat(savedVol));
         }
 
-        const savedVsync = localStorage.getItem('myboy_vsync') === 'true';
+        let savedVsync = false;
+        try { savedVsync = localStorage.getItem('myboy_vsync') === 'true'; } catch (e) {}
         this.setVSync(savedVsync);
 
         this._applySpeed();
@@ -137,22 +143,39 @@ export class EmulatorAdapter {
     });
 
     // Auto-flush saves on tab switch or page close
-    window.addEventListener('visibilitychange', () => {
+    document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
+        this.releaseAllKeys();
         this.flushBatterySave();
       }
     });
     window.addEventListener('beforeunload', () => {
       this.flushBatterySave();
     });
+    window.addEventListener('blur', () => this.releaseAllKeys());
+    window.addEventListener('pagehide', () => this.flushBatterySave());
   }
 
   flushBatterySave() {
     try {
-      this.iframe?.contentWindow?.postMessage({ type: 'EJS_FLUSH_SAVES' }, '*');
       const gm = this._gameManager;
       if (gm && typeof gm.saveSaveFiles === 'function') {
         gm.saveSaveFiles();
+        const data = gm.getSaveFile?.(false);
+        if (data?.length) {
+          const snapshot = new Uint8Array(data);
+          const romTitle = this.romTitle;
+          const romName = this.romName;
+          const savePath = gm.getSaveFilePath?.();
+          this._currentSaveData = snapshot;
+          if (this._pendingGameConfig) this._pendingGameConfig.initialSaveData = Array.from(snapshot);
+          try {
+            localStorage.setItem('gba_sav_backup_' + romTitle, saveStateManager._uint8ToBase64(snapshot));
+          } catch (error) {}
+          writeSavToIndexedDB(romTitle, romName, snapshot, savePath ? [savePath] : []);
+        }
+      } else {
+        this.iframe?.contentWindow?.postMessage({ type: 'EJS_FLUSH_SAVES' }, '*');
       }
     } catch (e) {}
   }
@@ -162,19 +185,33 @@ export class EmulatorAdapter {
     this.ejsReady = false;
     this.running = false;
     this.romLoaded = false;
+    this._sessionId++;
+    clearTimeout(this._reloadTimer);
+    this.releaseAllKeys();
     this.iframe.src = 'about:blank';
-    setTimeout(() => {
-      this.iframe.src = '/emulatorjs/embed.html';
+    this._reloadTimer = setTimeout(() => {
+      this.iframe.src = '/emulatorjs/embed.html?session=' + this._sessionId;
     }, 100);
   }
 
   // ===== ROM LOADING =====
 
   loadRom(arrayBuffer, fileName = 'game.gba') {
+    const data = new Uint8Array(arrayBuffer);
+    if (data.length < 0xc0 || data.length > 0x2000000) throw new Error('ROM GBA không hợp lệ.');
+    this.flushBatterySave();
+    this.releaseAllKeys();
+    clearTimeout(this._reloadTimer);
+    if (this._romBlobUrl) URL.revokeObjectURL(this._romBlobUrl);
+    this._currentSaveData = null;
+    this._cheats = [];
+    this.freezeList = [];
+    this.ejsInstance = null;
+    this.romSize = data.length;
+    this._sessionId++;
     this.romName = fileName;
 
     // Extract title from ROM header (offset 0xA0, 12 bytes)
-    const data = new Uint8Array(arrayBuffer);
     let title = '';
     for (let i = 0xA0; i < 0xAC; i++) {
       const ch = data[i];
@@ -210,11 +247,13 @@ export class EmulatorAdapter {
     // Create a blob URL for the ROM
     const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
     const blobUrl = URL.createObjectURL(blob);
+    this._romBlobUrl = blobUrl;
 
     // Restore previous session save data if available
     let initialSave = this._currentSaveData;
     if (!initialSave) {
-      const b64 = localStorage.getItem('gba_sav_backup_' + this.romTitle);
+      let b64 = null;
+      try { b64 = localStorage.getItem('gba_sav_backup_' + this.romTitle); } catch (e) {}
       if (b64) {
         try {
           const raw = atob(b64);
@@ -237,8 +276,8 @@ export class EmulatorAdapter {
 
     // Reload iframe cleanly to destroy any previous WASM memory
     this.iframe.src = 'about:blank';
-    setTimeout(() => {
-      this.iframe.src = '/emulatorjs/embed.html';
+    this._reloadTimer = setTimeout(() => {
+      this.iframe.src = '/emulatorjs/embed.html?session=' + this._sessionId;
     }, 50);
 
     return true;
@@ -246,6 +285,12 @@ export class EmulatorAdapter {
 
   getRomTitle() {
     return this.romTitle || this.romName.replace(/\.[^/.]+$/, '');
+  }
+
+  getRomChecksum() {
+    const gm = this._gameManager;
+    try { return globalThis.GBAKMemory.stateMemory(gm?.getState?.())?.romCrc32 ?? null; }
+    catch (error) { return null; }
   }
 
   // ===== CONTROLS & LIFECYCLE =====
@@ -272,6 +317,7 @@ export class EmulatorAdapter {
   }
 
   pause() {
+    this.releaseAllKeys();
     this.paused = true;
     const gm = this._gameManager;
     if (gm && gm.toggleMainLoop) gm.toggleMainLoop(0);
@@ -292,6 +338,11 @@ export class EmulatorAdapter {
   }
 
   // ===== INPUT =====
+
+  releaseAllKeys() {
+    for (const key of Object.keys(this._keyState)) this.setKeyUp(Number(key));
+    this.fastForward = false;
+  }
 
   setKeyDown(keyBit) {
     if (this._keyState[keyBit]) return;
@@ -446,7 +497,7 @@ export class EmulatorAdapter {
       if (typeof gm.getState === 'function') {
         const u8 = gm.getState();
         if (u8 && u8.length > 0) {
-          stateData = u8;
+          stateData = new Uint8Array(u8);
         }
       } else if (gm.functions && typeof gm.functions.saveStateInfo === 'function') {
         const parts = gm.functions.saveStateInfo().split('|');
@@ -478,16 +529,24 @@ export class EmulatorAdapter {
 
   async loadState(slot = 1) {
     const gm = this._gameManager;
+    const romTitle = this.romTitle;
     if (!this.romLoaded || !gm) return false;
 
     try {
-      const loaded = await saveStateManager.loadState(this.romTitle, slot);
+      const loaded = await saveStateManager.loadState(romTitle, slot);
+      if (gm !== this._gameManager || romTitle !== this.romTitle) return false;
       if (!loaded || !loaded.state) return false;
 
       const u8 = loaded.state instanceof Uint8Array ? loaded.state : new Uint8Array(loaded.state);
       if (typeof gm.loadState === 'function') {
-        gm.loadState(u8);
-        return true;
+        const savedMemory = globalThis.GBAKMemory.stateMemory(u8);
+        const liveMemory = typeof gm.getState === 'function' ? globalThis.GBAKMemory.stateMemory(gm.getState()) : null;
+        if (!savedMemory || (liveMemory && savedMemory.romCrc32 !== liveMemory.romCrc32)) {
+          throw new Error('State không hợp lệ hoặc thuộc ROM khác.');
+        }
+        this.releaseAllKeys();
+        const result = await gm.loadState(u8);
+        return result !== false && result !== 0;
       }
       return false;
     } catch (e) {
@@ -517,7 +576,7 @@ export class EmulatorAdapter {
         return cw.EJS_getMemoryBases();
       }
     } catch (e) {}
-    return { ewramBase: 0x5bda98, iwramBase: 0x5fda98 };
+    return null;
   }
 
   getMemorySnapshot() {
@@ -526,7 +585,7 @@ export class EmulatorAdapter {
     try {
       const heapU8 = gm.Module?.HEAPU8;
       if (heapU8) {
-        const { ewramBase, iwramBase } = this._getMemoryBases();
+        const { ewramBase = -1, iwramBase = -1 } = this._getMemoryBases() || {};
         if (ewramBase >= 0 && ewramBase + 0x40000 <= heapU8.length &&
             iwramBase >= 0 && iwramBase + 0x8000 <= heapU8.length) {
           return {
@@ -551,10 +610,11 @@ export class EmulatorAdapter {
         }
       }
 
-      if (state && state.length >= 0x61000) {
+      const memory = globalThis.GBAKMemory.stateMemory(state);
+      if (memory) {
         return {
-          ewram: state.subarray(0x21000, 0x21000 + 0x40000),
-          iwram: state.subarray(0x19000, 0x19000 + 0x8000),
+          ewram: new Uint8Array(memory.ewram),
+          iwram: new Uint8Array(memory.iwram),
           fullState: state
         };
       }
@@ -565,11 +625,13 @@ export class EmulatorAdapter {
   }
 
   readMemory(addr, type = 'u16', cachedSnapshot = null) {
+    if (!globalThis.GBAKMemory.ramAccess(addr, type)) return 0;
     // 1. Direct iframe memory read (instant, zero overhead)
     try {
       const cw = this.iframe?.contentWindow;
       if (cw && typeof cw.EJS_readMemory === 'function') {
-        return cw.EJS_readMemory(addr, type);
+        const value = cw.EJS_readMemory(addr, type);
+        if (value !== null) return value;
       }
     } catch (e) {}
 
@@ -577,14 +639,14 @@ export class EmulatorAdapter {
     const gm = this._gameManager;
     const heapU8 = gm?.Module?.HEAPU8;
     if (heapU8) {
-      const { ewramBase, iwramBase } = this._getMemoryBases();
+      const { ewramBase = -1, iwramBase = -1 } = this._getMemoryBases() || {};
       let ptr = -1;
-      if (addr >= 0x02000000 && addr < 0x02040000) {
+      if (ewramBase >= 0 && addr >= 0x02000000 && addr < 0x02040000) {
         ptr = ewramBase + (addr & 0x3FFFF);
-      } else if (addr >= 0x03000000 && addr < 0x03008000) {
+      } else if (iwramBase >= 0 && addr >= 0x03000000 && addr < 0x03008000) {
         ptr = iwramBase + (addr & 0x7FFF);
       }
-      if (ptr !== -1 && ptr + 4 <= heapU8.length) {
+      if (ptr !== -1 && ptr + globalThis.GBAKMemory.ramAccess(addr, type).size <= heapU8.length) {
         if (type === 'u8') return heapU8[ptr];
         if (type === 'u16') return heapU8[ptr] | (heapU8[ptr + 1] << 8);
         if (type === 'u32') return (heapU8[ptr] | (heapU8[ptr + 1] << 8) | (heapU8[ptr + 2] << 16) | (heapU8[ptr + 3] << 24)) >>> 0;
@@ -612,7 +674,7 @@ export class EmulatorAdapter {
 
   writeMemory(addr, val, type = 'u16') {
     val = Number(val);
-    if (val > 65535 && type !== 'u32') type = 'u32';
+    if (!globalThis.GBAKMemory.ramAccess(addr, type, val)) return false;
 
     // 1. Direct iframe poke (instant, zero overhead)
     try {
@@ -627,14 +689,14 @@ export class EmulatorAdapter {
     const gm = this._gameManager;
     const heapU8 = gm?.Module?.HEAPU8;
     if (heapU8) {
-      const { ewramBase, iwramBase } = this._getMemoryBases();
+      const { ewramBase = -1, iwramBase = -1 } = this._getMemoryBases() || {};
       let ptr = -1;
-      if (addr >= 0x02000000 && addr < 0x02040000) {
+      if (ewramBase >= 0 && addr >= 0x02000000 && addr < 0x02040000) {
         ptr = ewramBase + (addr & 0x3FFFF);
-      } else if (addr >= 0x03000000 && addr < 0x03008000) {
+      } else if (iwramBase >= 0 && addr >= 0x03000000 && addr < 0x03008000) {
         ptr = iwramBase + (addr & 0x7FFF);
       }
-      if (ptr !== -1 && ptr + 4 <= heapU8.length) {
+      if (ptr !== -1 && ptr + globalThis.GBAKMemory.ramAccess(addr, type).size <= heapU8.length) {
         if (type === 'u8') {
           heapU8[ptr] = val & 0xFF;
         } else if (type === 'u16') {
@@ -660,9 +722,11 @@ export class EmulatorAdapter {
     return {
       get cheats() { return self._cheats; },
       addCheat(name, code) {
-        const id = Date.now().toString(36);
+        const id = crypto.randomUUID();
         const lines = (code || '').trim().split(/[\r\n]+/);
-        const formatted = lines.map(l => self.normalizeGbaCheatLine(l) || l.trim()).filter(Boolean).join('\n');
+        const normalized = lines.filter(line => line.trim()).map(line => self.normalizeGbaCheatLine(line));
+        if (!normalized.length || normalized.some(line => !line)) throw new Error('Mã cheat không hợp lệ.');
+        const formatted = normalized.join('\n');
         self._cheats.push({ id, name: name || 'Cheat', code: formatted, enabled: true });
         self._applyCheatsToEJS();
         self._saveCheatsToStorage();
@@ -675,7 +739,7 @@ export class EmulatorAdapter {
       toggleCheat(id, enabled) {
         const cheat = self._cheats.find(c => c.id === id);
         if (cheat) {
-          cheat.enabled = enabled;
+          cheat.enabled = enabled === undefined ? !cheat.enabled : Boolean(enabled);
           self._applyCheatsToEJS();
           self._saveCheatsToStorage();
         }
@@ -688,60 +752,7 @@ export class EmulatorAdapter {
   }
 
   normalizeGbaCheatLine(rawLine) {
-    if (!rawLine) return null;
-    const clean = rawLine.trim().toUpperCase();
-    const hexOnly = clean.replace(/[^0-9A-F]/g, '');
-
-    // Case 1: 12 hex digits (8 addr + 4 val) e.g. 82003884 03E7, 02003884:03E7, 8200388403E7
-    if (hexOnly.length === 12) {
-      let addr = hexOnly.substring(0, 8);
-      const val = hexOnly.substring(8, 12);
-      // If raw RAM address (02xxxxxx or 03xxxxxx), convert to CodeBreaker write so mGBA accepts it
-      if (addr.startsWith('02')) {
-        addr = '82' + addr.substring(2);
-      } else if (addr.startsWith('03')) {
-        addr = '83' + addr.substring(2);
-      }
-      return `${addr} ${val}`; // Exactly 13 characters required by mGBA
-    }
-
-    // Case 2: 10 hex digits (8 addr + 2 val byte write) e.g. 02025840 44, 32025840 44
-    if (hexOnly.length === 10) {
-      let addr = hexOnly.substring(0, 8);
-      const val = hexOnly.substring(8, 10).padStart(4, '0');
-      if (addr.startsWith('02')) {
-        addr = '32' + addr.substring(2);
-      } else if (addr.startsWith('03')) {
-        addr = '33' + addr.substring(2);
-      } else if (!addr.startsWith('32') && !addr.startsWith('33')) {
-        addr = '32' + addr.substring(2);
-      }
-      return `${addr} ${val}`; // Exactly 13 characters required by mGBA
-    }
-
-    // Case 3: 16 hex digits (8 + 8) GameShark v3 / Action Replay MAX
-    if (hexOnly.length === 16) {
-      const part1 = hexOnly.substring(0, 8);
-      const part2 = hexOnly.substring(8, 16);
-      return `${part1} ${part2}`; // Exactly 17 characters required by mGBA
-    }
-
-    // Fallback: If it's already separated by space or colon, ensure standard single space
-    const parts = clean.split(/[\s:+]+/).filter(Boolean);
-    if (parts.length === 2) {
-      let [p1, p2] = parts;
-      if (p1.length === 8 && p2.length <= 4) {
-        p2 = p2.padStart(4, '0');
-        if (p1.startsWith('02')) p1 = '82' + p1.substring(2);
-        if (p1.startsWith('03')) p1 = '83' + p1.substring(2);
-        return `${p1} ${p2}`;
-      }
-      if (p1.length === 8 && p2.length === 8) {
-        return `${p1} ${p2}`;
-      }
-    }
-
-    return clean;
+    return globalThis.GBAKMemory.normalizeCheat(rawLine);
   }
 
   _applyCheatsToEJS() {
@@ -751,12 +762,8 @@ export class EmulatorAdapter {
     for (const cheat of this._cheats) {
       if (!cheat.enabled) continue;
       const lines = cheat.code.trim().split(/[\n\r]+/);
-      for (const line of lines) {
-        const normalized = this.normalizeGbaCheatLine(line);
-        if (normalized) {
-          codes.push(normalized);
-        }
-      }
+      const normalized = lines.map(line => this.normalizeGbaCheatLine(line));
+      if (normalized.length && normalized.every(Boolean)) codes.push(normalized.join('+'));
     }
 
     // 2. Active Freezes as hardware cheats
@@ -774,15 +781,8 @@ export class EmulatorAdapter {
       const cw = this.iframe?.contentWindow;
       if (cw && typeof cw.EJS_setActiveCheats === 'function') {
         cw.EJS_setActiveCheats(codes);
+        return;
       }
-    } catch (e) {}
-
-    // 4. Post to iframe via postMessage for cross-frame reliability
-    try {
-      this.iframe?.contentWindow?.postMessage({
-        type: 'EJS_SET_CHEATS',
-        codes
-      }, '*');
     } catch (e) {}
 
     // 5. Also register on gameManager if supported
@@ -799,6 +799,7 @@ export class EmulatorAdapter {
 
   _formatFreezeAsCheat(addr, val, type = 'u16') {
     val = Number(val);
+    if (!globalThis.GBAKMemory.ramAccess(addr, type, val)) return null;
     const isEwram = (addr >= 0x02000000 && addr < 0x02040000);
     const isIwram = (addr >= 0x03000000 && addr < 0x03008000);
     if (!isEwram && !isIwram) return null;
@@ -810,7 +811,7 @@ export class EmulatorAdapter {
     if (type === 'u8') {
       return `${bytePrefix}${off} 00${(val & 0xFF).toString(16).padStart(2, '0').toUpperCase()}`;
     }
-    if (type === 'u32' || val > 65535) {
+    if (type === 'u32') {
       const off2 = ((addr + 2) & 0x00FFFFFF).toString(16).padStart(6, '0').toUpperCase();
       const low16 = (val & 0xFFFF).toString(16).padStart(4, '0').toUpperCase();
       const high16 = ((val >>> 16) & 0xFFFF).toString(16).padStart(4, '0').toUpperCase();
@@ -822,6 +823,8 @@ export class EmulatorAdapter {
   _saveCheatsToStorage() {
     try {
       localStorage.setItem('myboy_cheats_' + (this.romTitle || 'default'), JSON.stringify(this._cheats));
+      const checksum = this.getRomChecksum();
+      if (checksum !== null) localStorage.setItem('myboy_cheats_crc_' + this.romTitle, String(checksum));
     } catch (e) {}
   }
 
@@ -829,11 +832,13 @@ export class EmulatorAdapter {
     try {
       const data = localStorage.getItem('myboy_cheats_' + (this.romTitle || 'default'));
       const raw = data ? JSON.parse(data) : [];
-      this._cheats = raw.map(c => {
+      const savedChecksum = localStorage.getItem('myboy_cheats_crc_' + this.romTitle);
+      const matchesRom = savedChecksum !== null && savedChecksum === String(this.getRomChecksum());
+      this._cheats = (Array.isArray(raw) ? raw : []).filter(c => c && typeof c.code === 'string' && typeof c.id === 'string').map(c => {
         if (!c.code) return c;
         const lines = c.code.trim().split(/[\r\n]+/);
-        const formatted = lines.map(l => this.normalizeGbaCheatLine(l) || l.trim()).filter(Boolean).join('\n');
-        return { ...c, code: formatted };
+        const normalized = lines.map(line => this.normalizeGbaCheatLine(line));
+        return { ...c, code: normalized.every(Boolean) ? normalized.join('\n') : c.code, enabled: matchesRom && normalized.every(Boolean) && c.enabled === true };
       });
       this._applyCheatsToEJS();
     } catch (e) {
@@ -844,7 +849,8 @@ export class EmulatorAdapter {
   // ===== AUDIO =====
 
   setVolume(v) {
-    const vol = Math.max(0, Math.min(1, parseFloat(v) ?? 1.0));
+    const parsed = parseFloat(v);
+    const vol = Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 1;
     this._volume = vol;
     try {
       localStorage.setItem('gba_k_volume', vol.toString());
@@ -970,8 +976,6 @@ export class EmulatorAdapter {
         `/data/saves/${safeTitle}.sav`,
         `/data/saves/${baseName}.srm`,
         `/data/saves/${baseName}.sav`,
-        `/data/saves/game.srm`,
-        `/data/saves/game.sav`,
         `/${safeTitle}.srm`,
         `/${safeTitle}.sav`
       ].filter(Boolean);
@@ -1031,6 +1035,7 @@ export class EmulatorAdapter {
   }
 
   async importSavFile(arrayBuffer, fileName = null) {
+    const sessionId = this._sessionId;
     if (!this.romLoaded) {
       if (window.showAppToast) window.showAppToast('⚠️ Vui lòng mở game trước khi nạp file .SAV!');
       return false;
@@ -1038,7 +1043,7 @@ export class EmulatorAdapter {
 
     try {
       const u8 = arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer);
-      if (!u8 || u8.length === 0) {
+      if (!u8 || u8.length === 0 || u8.length > 1024 * 1024) {
         if (window.showAppToast) window.showAppToast('❌ File .SAV trống hoặc không hợp lệ!');
         return false;
       }
@@ -1054,8 +1059,6 @@ export class EmulatorAdapter {
         `/data/saves/${safeTitle}.sav`,
         `/data/saves/${baseName}.srm`,
         `/data/saves/${baseName}.sav`,
-        `/data/saves/game.srm`,
-        `/data/saves/game.sav`,
         `/${safeTitle}.srm`,
         `/${safeTitle}.sav`
       ].filter(Boolean);
@@ -1073,18 +1076,19 @@ export class EmulatorAdapter {
       }
 
       // 2. Direct persistence into IndexedDB ('/data/saves', 'FILE_DATA')
-      await writeSavToIndexedDB(safeTitle, baseName, u8, candidatePaths);
+      let persisted = await writeSavToIndexedDB(safeTitle, baseName, u8, candidatePaths);
+      if (sessionId !== this._sessionId) throw new Error('ROM đã thay đổi trong lúc nạp SAV.');
 
       // 3. Backup to localStorage for redundancy and immediate restore
-      this._currentSaveData = u8;
-      if (this._pendingGameConfig) {
-        this._pendingGameConfig.initialSaveData = Array.from(u8);
-      }
       try {
         let binary = '';
         for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
         localStorage.setItem('gba_sav_backup_' + safeTitle, btoa(binary));
+        persisted = true;
       } catch (e) {}
+      if (!persisted) throw new Error('Không thể lưu SAV bền vững; hãy kiểm tra dung lượng lưu trữ.');
+      this._currentSaveData = new Uint8Array(u8);
+      if (this._pendingGameConfig) this._pendingGameConfig.initialSaveData = Array.from(u8);
 
       // 4. Reload save into core and restart game immediately without black screen
       if (gm) {
@@ -1117,6 +1121,7 @@ export class EmulatorAdapter {
 
   async getBatterySaveBuffer() {
     const gm = this._gameManager;
+    try { gm?.saveSaveFiles?.(); } catch (error) {}
     let saveData = null;
     if (gm && typeof gm.getSaveFile === 'function') {
       try { saveData = gm.getSaveFile(false); } catch (e) {}
@@ -1137,8 +1142,6 @@ export class EmulatorAdapter {
       `/data/saves/${safeTitle}.sav`,
       `/data/saves/${baseName}.srm`,
       `/data/saves/${baseName}.sav`,
-      `/data/saves/game.srm`,
-      `/data/saves/game.sav`,
       `/${safeTitle}.srm`,
       `/${safeTitle}.sav`
     ].filter(Boolean);
@@ -1193,68 +1196,40 @@ export class EmulatorAdapter {
   }
 
   async clearBatterySave() {
+    if (!this.romLoaded) return false;
+    const sessionId = this._sessionId;
     const safeTitle = (this.romTitle || 'game').trim();
     const baseName = (this.romName || safeTitle).replace(/\.[^/.]+$/, '').trim();
-
-    this._currentSaveData = null;
-    if (this._pendingGameConfig) {
-      this._pendingGameConfig.initialSaveData = null;
-    }
-
-    // 1. Remove from localStorage
+    const gm = this._gameManager;
+    const paths = [...new Set([
+      gm?.getSaveFilePath?.(),
+      `/data/saves/${safeTitle}.srm`, `/data/saves/${safeTitle}.sav`,
+      `/data/saves/${baseName}.srm`, `/data/saves/${baseName}.sav`,
+      `/${safeTitle}.srm`, `/${safeTitle}.sav`
+    ].filter(Boolean))];
+    const wasPaused = this.paused;
+    this.pause();
     try {
+      if (gm?.FS) {
+        for (const path of paths) {
+          if (gm.FS.analyzePath(path).exists) gm.FS.unlink(path);
+        }
+        if (gm.FS.syncfs) {
+          await new Promise((resolve, reject) => gm.FS.syncfs(false, error => error ? reject(error) : resolve()));
+        }
+      }
+      if (!await deleteBatteryFiles(paths)) throw new Error('Không thể xoá SAV khỏi bộ nhớ lưu trữ.');
+      if (sessionId !== this._sessionId) throw new Error('ROM đã thay đổi trong lúc xoá SAV.');
       localStorage.removeItem('gba_sav_backup_' + safeTitle);
       localStorage.removeItem('gba_sav_backup_' + baseName);
-    } catch (e) {}
-
-    // 2. Remove from IndexedDB
-    if (window.indexedDB) {
-      try {
-        const req = indexedDB.open('/data/saves', 21);
-        req.onsuccess = (e) => {
-          const db = e.target.result;
-          if (db.objectStoreNames.contains('FILE_DATA')) {
-            const tx = db.transaction('FILE_DATA', 'readwrite');
-            const store = tx.objectStore('FILE_DATA');
-            const candidateKeys = [
-              `/data/saves/${safeTitle}.srm`,
-              `/data/saves/${safeTitle}.sav`,
-              `/data/saves/${baseName}.srm`,
-              `/data/saves/${baseName}.sav`,
-              `/data/saves/game.srm`,
-              `/data/saves/game.sav`,
-              `/${safeTitle}.srm`,
-              `/${safeTitle}.sav`
-            ];
-            for (const k of candidateKeys) {
-              try { store.delete(k); } catch (err) {}
-            }
-          }
-        };
-      } catch (e) {}
+      this._currentSaveData = null;
+      if (this._pendingGameConfig) this._pendingGameConfig.initialSaveData = null;
+      this.reboot();
+      return true;
+    } catch (error) {
+      if (!wasPaused && sessionId === this._sessionId) this.resume();
+      throw error;
     }
-
-    // 3. Remove from MEMFS in iframe
-    const gm = this._gameManager;
-    if (gm?.FS) {
-      const paths = [
-        gm.getSaveFilePath ? gm.getSaveFilePath() : null,
-        `/data/saves/${safeTitle}.srm`,
-        `/data/saves/${safeTitle}.sav`,
-        `/data/saves/${baseName}.srm`,
-        `/data/saves/${baseName}.sav`,
-        `/data/saves/game.srm`,
-        `/data/saves/game.sav`
-      ].filter(Boolean);
-      for (const p of paths) {
-        try { gm.FS.unlink(p); } catch (e) {}
-      }
-      try { gm.FS.syncfs(false, () => {}); } catch (e) {}
-    }
-
-    // 4. Clean reboot
-    this.reboot();
-    return true;
   }
 
   // ===== FREEZE LIST =====
@@ -1284,10 +1259,12 @@ export class EmulatorAdapter {
   }
 
   addFreeze(address, value, dataType) {
+    if (!globalThis.GBAKMemory.ramAccess(address, dataType, Number(value))) return false;
     this.freezeList = this.freezeList.filter(f => f.address !== address);
     this.freezeList.push({ address, value, dataType });
     this.saveFreezeList();
     this._applyCheatsToEJS();
+    return true;
   }
 
   removeFreeze(address) {
@@ -1299,13 +1276,18 @@ export class EmulatorAdapter {
   saveFreezeList() {
     try {
       localStorage.setItem('myboy_freezes_' + (this.romTitle || 'default'), JSON.stringify(this.freezeList));
+      const checksum = this.getRomChecksum();
+      if (checksum !== null) localStorage.setItem('myboy_freezes_crc_' + this.romTitle, String(checksum));
     } catch (e) {}
   }
 
   loadFreezeList() {
     try {
       const data = localStorage.getItem('myboy_freezes_' + (this.romTitle || 'default'));
-      this.freezeList = data ? JSON.parse(data) : [];
+      const entries = data ? JSON.parse(data) : [];
+      const checksum = localStorage.getItem('myboy_freezes_crc_' + this.romTitle);
+      this.freezeList = checksum !== null && checksum === String(this.getRomChecksum())
+        ? (Array.isArray(entries) ? entries : []).filter(entry => entry && globalThis.GBAKMemory.ramAccess(entry.address, entry.dataType, Number(entry.value))) : [];
       // Stop any legacy freeze timer from previous versions
       this._stopFreezeLoop();
       // Apply all freezes as cheat codes

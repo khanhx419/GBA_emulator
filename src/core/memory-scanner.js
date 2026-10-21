@@ -65,7 +65,8 @@ export class GBAMemoryScanner {
       offset = addr - 0x03000000;
     }
 
-    if (!buf || offset < 0 || offset >= buf.length) return 0;
+    const width = { u8: 1, u16: 2, u32: 4 }[type];
+    if (!width || !buf || offset < 0 || offset + width > buf.length) return 0;
 
     if (type === 'u8') {
       return buf[offset];
@@ -93,9 +94,7 @@ export class GBAMemoryScanner {
   // Live single-address write
   writeValue(addr, val, type = this.valueType) {
     val = Number(val);
-    if (val > 65535 && type !== 'u32') {
-      type = 'u32';
-    }
+    if (!globalThis.GBAKMemory.ramAccess(addr, type, val)) return false;
     if (typeof this.gba.writeMemory === 'function') {
       return this.gba.writeMemory(addr, val, type);
     }
@@ -125,10 +124,11 @@ export class GBAMemoryScanner {
     const matches = [];
     // For u32, use step = 2 so 2-byte aligned 32-bit numbers (common in packed GBA structs) are not missed
     const step = this.valueType === 'u8' ? 1 : 2;
+    const width = { u8: 1, u16: 2, u32: 4 }[this.valueType];
     const mode = this.compareType;
 
     // Scan EWRAM (0x02000000, 256KB)
-    for (let offset = 0; offset <= 0x040000 - step; offset += step) {
+    for (let offset = 0; offset <= buffers.ewram.length - width; offset += step) {
       const addr = 0x02000000 + offset;
       const val = this.readFromBuffers(buffers, addr, this.valueType);
       let match = false;
@@ -157,7 +157,7 @@ export class GBAMemoryScanner {
 
     // Scan IWRAM (0x03000000, 32KB)
     if (matches.length < 5000) {
-      for (let offset = 0; offset <= 0x008000 - step; offset += step) {
+      for (let offset = 0; offset <= buffers.iwram.length - width; offset += step) {
         const addr = 0x03000000 + offset;
         const val = this.readFromBuffers(buffers, addr, this.valueType);
         let match = false;
@@ -233,12 +233,8 @@ export class GBAMemoryScanner {
   // Batch edit all found results
   editAll(newVal, type = this.valueType) {
     newVal = Number(newVal);
-    if (newVal > 65535 && type !== 'u32') {
-      type = 'u32';
-    }
     for (const item of this.results) {
-      this.writeValue(item.address, newVal, type);
-      item.value = newVal;
+      if (this.writeValue(item.address, newVal, type)) item.value = newVal;
     }
   }
 
@@ -246,18 +242,15 @@ export class GBAMemoryScanner {
   freezeAll(freezeVal = null) {
     for (const item of this.results) {
       const val = freezeVal !== null ? Number(freezeVal) : item.value;
-      const type = val > 65535 ? 'u32' : this.valueType;
-      this.writeValue(item.address, val, type);
-      this.gba.addFreeze(item.address, val, type);
+      const type = this.valueType;
+      if (this.writeValue(item.address, val, type)) this.gba.addFreeze(item.address, val, type);
     }
   }
 
   // Generate GBA CodeBreaker / GameShark code for a given address
   generateCheatCode(addr, val, type = this.valueType) {
     val = Number(val);
-    if (val > 65535 && type !== 'u32') {
-      type = 'u32';
-    }
+    if (!globalThis.GBAKMemory.ramAccess(addr, type, val)) return null;
     const isEwram = (addr >= 0x02000000 && addr < 0x02040000);
     const isIwram = (addr >= 0x03000000 && addr < 0x03008000);
     if (!isEwram && !isIwram) return null;
@@ -282,7 +275,7 @@ export class GBAMemoryScanner {
 
   // Create a cheat and add it directly to Cheat Manager
   createCheat(addr, val, name = null) {
-    const type = Number(val) > 65535 ? 'u32' : this.valueType;
+    const type = this.valueType;
     const code = this.generateCheatCode(addr, val, type);
     if (!code) return false;
     const cheatName = name || `Cheat 0x${addr.toString(16).toUpperCase()}`;
