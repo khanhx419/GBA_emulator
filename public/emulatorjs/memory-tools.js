@@ -23,6 +23,7 @@
     const magic = view.getUint32(offset, true);
     if ((magic >>> 24) !== 1 || (magic & 0xffffff) > 0x100) return null;
     return {
+      stateOffset: offset,
       iwram: bytes.subarray(offset + 0x19000, offset + 0x21000),
       ewram: bytes.subarray(offset + 0x21000, offset + 0x61000),
       romCrc32: view.getUint32(offset + 8, true)

@@ -2,6 +2,7 @@
 
 ## Độ an toàn của cheat và dữ liệu lưu
 
+- Radical Red 4.1 có CRC `FBA55DD8` được áp dụng bản vá tương thích trong bộ nhớ khi mở ROM: tránh chờ vô hạn tín hiệu âm thanh ở bước 12 của tiến hoá. File ROM trên máy và trong thư viện không bị ghi đè. State cũ được nhận diện và chuyển riêng trường CRC sang `4085AE7B` khi nạp; dữ liệu CPU/RAM/tiến trình giữ nguyên. ROM khác không nhận bản vá này.
 - Load state giữ chế độ tua nhanh và hệ số đang chọn. Nút tua nhanh bật/tắt cố định độc lập với giữ Tab tạm thời; vẫn có preset 1x–5x và thanh chỉnh từng 0,25x.
 - Cheat và đóng băng RAM dùng lõi mGBA; không ghi đồng thời bằng vòng lặp riêng.
 - Địa chỉ RAM WASM chỉ được dùng sau khi đối chiếu đủ EWRAM và IWRAM với state. Không tìm được địa chỉ đáng tin cậy thì từ chối ghi.

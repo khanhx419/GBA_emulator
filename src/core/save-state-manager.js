@@ -350,8 +350,9 @@ export class SaveStateManager {
       const key = this._getKey(romTitle, item.slot);
       if (keys.has(key)) throw new Error('Backup chứa slot trùng lặp.');
       keys.add(key);
-      const state = this._base64ToUint8(item.stateBase64);
+      let state = this._base64ToUint8(item.stateBase64);
       if (!state.length || state.length > 16 * 1024 * 1024) throw new Error('Dữ liệu state không hợp lệ.');
+      state = globalThis.GBAKCompatibility.prepareState(state, expectedRomCrc32);
       const memory = globalThis.GBAKMemory?.stateMemory(state);
       if (!memory || (expectedRomCrc32 !== null && memory.romCrc32 !== expectedRomCrc32)) throw new Error('State bị hỏng hoặc thuộc phiên bản ROM khác.');
       return { ...item, key, romTitle, state, screenshot: this._safeScreenshot(item.screenshot) };

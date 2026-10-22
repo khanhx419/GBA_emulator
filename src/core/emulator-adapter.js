@@ -200,6 +200,7 @@ export class EmulatorAdapter {
   loadRom(arrayBuffer, fileName = 'game.gba') {
     const data = new Uint8Array(arrayBuffer);
     if (data.length < 0xc0 || data.length > 0x2000000) throw new Error('ROM GBA không hợp lệ.');
+    const preparedRom = globalThis.GBAKCompatibility.prepareRom(data);
     this.flushBatterySave();
     this.releaseAllKeys();
     clearTimeout(this._reloadTimer);
@@ -209,6 +210,8 @@ export class EmulatorAdapter {
     this.freezeList = [];
     this.ejsInstance = null;
     this.romSize = data.length;
+    this._romCompatibility = { compatibilityId: preparedRom.compatibilityId,
+      sourceCrc32: preparedRom.sourceCrc32, runtimeCrc32: preparedRom.runtimeCrc32 };
     this._sessionId++;
     this.romName = fileName;
 
@@ -247,7 +250,7 @@ export class EmulatorAdapter {
     this.iframe.style.display = 'block';
 
     // Create a blob URL for the ROM
-    const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
+    const blob = new Blob([preparedRom.bytes], { type: 'application/octet-stream' });
     const blobUrl = URL.createObjectURL(blob);
     this._romBlobUrl = blobUrl;
 
@@ -490,10 +493,11 @@ export class EmulatorAdapter {
       if (gm !== this._gameManager || romTitle !== this.romTitle) return false;
       if (!loaded || !loaded.state) return false;
 
-      const u8 = loaded.state instanceof Uint8Array ? loaded.state : new Uint8Array(loaded.state);
+      let u8 = loaded.state instanceof Uint8Array ? loaded.state : new Uint8Array(loaded.state);
       if (typeof gm.loadState === 'function') {
-        const savedMemory = globalThis.GBAKMemory.stateMemory(u8);
         const liveMemory = typeof gm.getState === 'function' ? globalThis.GBAKMemory.stateMemory(gm.getState()) : null;
+        u8 = globalThis.GBAKCompatibility.prepareState(u8, liveMemory?.romCrc32 ?? this._romCompatibility?.runtimeCrc32 ?? null);
+        const savedMemory = globalThis.GBAKMemory.stateMemory(u8);
         if (!savedMemory || (liveMemory && savedMemory.romCrc32 !== liveMemory.romCrc32)) {
           throw new Error('State không hợp lệ hoặc thuộc ROM khác.');
         }
