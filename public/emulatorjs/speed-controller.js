@@ -6,7 +6,6 @@
       const ratio = Number.isFinite(parsed) ? Math.max(1, Math.min(5, parsed)) : 2;
       const enabled = Boolean(fastForward) && ratio > 1;
       const vsync = Boolean(vsyncEnabled) && !enabled;
-      const frameskip = enabled ? Math.max(0, Math.ceil(ratio) - 2) : 0;
       const emulator = getEmulator();
       const manager = emulator?.gameManager;
       if (!manager) return false;
@@ -27,7 +26,7 @@
         const restartFastForward = !changed && applied.enabled && enabled && applied.ratio !== ratio;
         if (restartFastForward) invoke('toggleFastForward', 0);
         if (changed || applied.ratio !== ratio) invoke('setFastForwardRatio', ratio);
-        if (changed || applied.frameskip !== frameskip) invoke('setVariable', 'mgba_frameskip', String(frameskip));
+        if (changed) invoke('setVariable', 'mgba_frameskip', '0');
         if (changed || applied.vsync !== vsync) invoke('setVSync', vsync ? 1 : 0);
         if (changed || applied.enabled !== enabled || restartFastForward) {
           if (manager.Module?.ccall) {
@@ -39,7 +38,7 @@
         } else if (changed || applied.vsync !== vsync) {
           try { manager.Module?.ccall?.('retroarch_set_config_option', 'void', ['string', 'string'], ['video_vsync', vsync ? 'true' : 'false']); } catch (error) {}
         }
-        applied = { manager, ratio, enabled, vsync, frameskip };
+        applied = { manager, ratio, enabled, vsync };
         return true;
       } catch (error) {
         applied = null;

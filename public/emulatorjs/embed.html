@@ -171,10 +171,8 @@
             } catch (e) {}
           });
         }
-        // Ensure RetroArch config disables font / OSD notifications and enables frameskip + audio mute during fast-forward
         try {
           const gm = window.EJS_emulator?.gameManager;
-          // Enable mGBA core frameskip & idle optimization directly via runtime Cwrap
           if (gm) {
             const setVSync = gm.setVSync || gm.functions?.setVSync;
             if (setVSync) {
@@ -186,15 +184,10 @@
               setVar.call(gm, 'mgba_idle_optimization', "Don't Remove");
               setVar.call(gm, 'mgba_interframe_blending', 'disabled');
               setVar.call(gm, 'mgba_color_correction', 'disabled');
-              if (gm.Module && gm.Module.ccall) {
-                try {
-                  gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'], ['audio_sync', 'false']);
-                } catch (e) {}
-              }
             }
           }
           if (pendingSpeed) {
-            applySpeed(pendingSpeed.fastForward, pendingSpeed.speedMultiplier);
+            applySpeed(pendingSpeed.fastForward, pendingSpeed.speedMultiplier, true);
           }
         } catch (e) {}
         document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="virtualGamepad"], .ejs_message, [class*="ejs_message"]').forEach(el => el.remove());
