@@ -2,6 +2,7 @@
 
 ## Độ an toàn của cheat và dữ liệu lưu
 
+- Load state giữ chế độ tua nhanh và hệ số đang chọn. Nút tua nhanh bật/tắt cố định độc lập với giữ Tab tạm thời; vẫn có preset 1x–5x và thanh chỉnh từng 0,25x.
 - Cheat và đóng băng RAM dùng lõi mGBA; không ghi đồng thời bằng vòng lặp riêng.
 - Địa chỉ RAM WASM chỉ được dùng sau khi đối chiếu đủ EWRAM và IWRAM với state. Không tìm được địa chỉ đáng tin cậy thì từ chối ghi.
 - Giữ nguyên độ rộng u8/u16/u32 khi sửa RAM. Giá trị vượt giới hạn hoặc ghi vượt vùng nhớ sẽ bị từ chối.

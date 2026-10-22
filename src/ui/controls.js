@@ -135,19 +135,23 @@ export class GBAControls {
 
       if (e.code === 'Tab') {
         e.preventDefault();
+        if (e.repeat) return;
         const target = parseFloat(localStorage.getItem('myboy_ff_multiplier')) || 2.0;
         this.gba.speedMultiplier = Math.max(1.5, target);
-        this.gba.fastForward = true;
+        if (this.gba.setFastForwardHeld) this.gba.setFastForwardHeld(true);
+        else this.gba.fastForward = true;
         document.getElementById('btn-fastforward')?.classList.add('active');
         return;
       }
       if (e.code === 'F1') {
         e.preventDefault();
+        if (e.repeat) return;
         this.gba.saveState(1);
         return;
       }
       if (e.code === 'F3') {
         e.preventDefault();
+        if (e.repeat) return;
         this.gba.loadState(1);
         return;
       }
@@ -167,8 +171,9 @@ export class GBAControls {
       const tag = activeEl ? activeEl.tagName.toLowerCase() : '';
       if (e.code === 'Tab') {
         e.preventDefault();
-        this.gba.fastForward = false;
-        document.getElementById('btn-fastforward')?.classList.remove('active');
+        if (this.gba.setFastForwardHeld) this.gba.setFastForwardHeld(false);
+        else this.gba.fastForward = false;
+        document.getElementById('btn-fastforward')?.classList.toggle('active', this.gba.fastForward);
         return;
       }
 

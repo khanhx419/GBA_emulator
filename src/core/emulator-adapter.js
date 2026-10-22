@@ -30,6 +30,7 @@ export class EmulatorAdapter {
     // Speed & Sync
     this.speed = 1.0;
     this._fastForward = false;
+    this._fastForwardHeld = false;
     this._speedMultiplier = 1.0;
     this._vsyncEnabled = true;
 
@@ -226,6 +227,7 @@ export class EmulatorAdapter {
     this.paused = false;
     this.romLoaded = false;
     this._fastForward = false;
+    this._fastForwardHeld = false;
     this._speedMultiplier = 1.0;
     this._keyState = {};
     this._audioUnlocked = false;
@@ -339,9 +341,9 @@ export class EmulatorAdapter {
 
   // ===== INPUT =====
 
-  releaseAllKeys() {
+  releaseAllKeys({ releaseFastForwardHold = true } = {}) {
     for (const key of Object.keys(this._keyState)) this.setKeyUp(Number(key));
-    this.fastForward = false;
+    if (releaseFastForwardHold) this.setFastForwardHeld(false);
   }
 
   setKeyDown(keyBit) {
@@ -391,7 +393,7 @@ export class EmulatorAdapter {
 
   // ===== SPEED / FAST FORWARD =====
 
-  get fastForward() { return this._fastForward; }
+  get fastForward() { return !!(this._fastForward || this._fastForwardHeld); }
   set fastForward(val) {
     const bool = !!val;
     if (this._fastForward === bool) return;
@@ -401,89 +403,40 @@ export class EmulatorAdapter {
 
   get speedMultiplier() { return this._speedMultiplier; }
   set speedMultiplier(val) {
-    const num = parseFloat(val) || 1.0;
+    const parsed = Number(val);
+    const num = Number.isFinite(parsed) ? Math.max(1, Math.min(5, parsed)) : 1;
     if (this._speedMultiplier === num) return;
     this._speedMultiplier = num;
     this._applySpeed();
   }
 
-  _applySpeed() {
-    const ratio = Math.max(1, parseFloat(this._speedMultiplier) || 2.0);
-    const isFF = !!this._fastForward;
+  setFastForwardHeld(held) {
+    const enabled = Boolean(held);
+    if (Boolean(this._fastForwardHeld) === enabled) return;
+    this._fastForwardHeld = enabled;
+    this._applySpeed();
+  }
 
-    // 1. Post message to iframe (reliable across frame boundaries)
+  _applySpeed(force = false) {
+    const ratio = this._speedMultiplier;
+    const enabled = this.fastForward && ratio > 1;
     try {
-      this.iframe?.contentWindow?.postMessage({
-        type: 'EJS_SET_SPEED',
-        fastForward: isFF,
-        speedMultiplier: ratio
-      }, '*');
-    } catch (e) {}
-
-    // 2. Direct calls if same-context accessible
-    try {
-      const ejs = this.iframe?.contentWindow?.EJS_emulator;
-      const gm = this._gameManager;
-
-      if (ejs) {
-        ejs.isFastForward = isFF;
-        if (ejs.settings) {
-          ejs.settings['ff-ratio'] = ratio.toString();
-          ejs.settings['fastForward'] = isFF ? 'enabled' : 'disabled';
-        }
+      const frame = this.iframe?.contentWindow;
+      if (typeof frame?.EJS_applySpeed === 'function') {
+        frame.EJS_applySpeed(enabled, ratio, this._vsyncEnabled, force);
+      } else {
+        frame?.postMessage({ type: 'EJS_SET_SPEED', fastForward: enabled,
+          speedMultiplier: ratio, vsyncEnabled: this._vsyncEnabled, force }, '*');
       }
-
-      if (gm) {
-        const setRatio = gm.setFastForwardRatio || gm.functions?.setFastForwardRatio;
-        if (setRatio) {
-          setRatio.call(gm, ratio);
-        }
-
-        const toggleFF = gm.toggleFastForward || gm.functions?.toggleFastForward;
-        if (toggleFF) {
-          toggleFF.call(gm, isFF ? 1 : 0);
-        }
-
-        const setVSync = gm.setVSync || gm.functions?.setVSync;
-        if (setVSync) {
-          setVSync.call(gm, (isFF || !this._vsyncEnabled) ? 0 : 1);
-        }
-
-        const setVar = gm.setVariable || gm.functions?.setVariable;
-        if (setVar) {
-          let fsVal = "0";
-          if (isFF && ratio > 1.0) {
-            fsVal = Math.min(8, Math.max(1, Math.round(ratio) - 1)).toString();
-          }
-          setVar.call(gm, 'mgba_frameskip', fsVal);
-          setVar.call(gm, 'mgba_idle_optimization', "Don't Remove");
-        }
-      }
-    } catch (e) {}
+    } catch (error) {
+      console.warn('[GBA_K] Speed bridge unavailable:', error);
+    }
+    this.onSpeedChange?.(enabled, ratio);
   }
 
   setVSync(enabled) {
-    this._vsyncEnabled = !!enabled;
-    try {
-      this.iframe?.contentWindow?.postMessage({
-        type: 'EJS_SET_VSYNC',
-        enabled: this._vsyncEnabled
-      }, '*');
-    } catch (e) {}
-
-    const gm = this._gameManager;
-    if (gm) {
-      try {
-        const setVSync = gm.setVSync || gm.functions?.setVSync;
-        if (setVSync) {
-          setVSync.call(gm, (this._fastForward || !this._vsyncEnabled) ? 0 : 1);
-        }
-        if (gm.Module && gm.Module.ccall) {
-          gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'],
-            ['video_vsync', (this._fastForward || !this._vsyncEnabled) ? 'false' : 'true']);
-        }
-      } catch (e) {}
-    }
+    this._vsyncEnabled = Boolean(enabled);
+    this._applySpeed();
   }
 
   // ===== SAVE / LOAD STATE =====
@@ -544,9 +497,13 @@ export class EmulatorAdapter {
         if (!savedMemory || (liveMemory && savedMemory.romCrc32 !== liveMemory.romCrc32)) {
           throw new Error('State không hợp lệ hoặc thuộc ROM khác.');
         }
-        this.releaseAllKeys();
-        const result = await gm.loadState(u8);
-        return result !== false && result !== 0;
+        this.releaseAllKeys({ releaseFastForwardHold: false });
+        try {
+          const result = await gm.loadState(u8);
+          return result !== false && result !== 0;
+        } finally {
+          if (gm === this._gameManager && romTitle === this.romTitle) this._applySpeed(true);
+        }
       }
       return false;
     } catch (e) {

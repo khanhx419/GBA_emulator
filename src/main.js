@@ -878,6 +878,10 @@ window.addEventListener('DOMContentLoaded', () => {
   };
 
   // Always start with 1.0x (normal speed), Fast-Forward OFF
+  gba.onSpeedChange = (enabled, ratio) => {
+    document.getElementById('btn-fastforward')?.classList.toggle('active', enabled);
+    updateSpeedUI(enabled ? ratio : 1);
+  };
   gba.fastForward = false;
   gba.speedMultiplier = 1.0;
   updateSpeedUI(1.0);

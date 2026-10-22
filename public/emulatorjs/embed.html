@@ -62,6 +62,7 @@
 <body>
   <div id="game"></div>
   <script src="/emulatorjs/memory-tools.js"></script>
+  <script src="/emulatorjs/speed-controller.js"></script>
   <script>
     const sessionId = new URLSearchParams(window.location.search).get('session');
     // Proactively remove any virtual gamepad & message elements injected by EmulatorJS
@@ -221,6 +222,7 @@
       let pendingSpeed = null;
 
       let userVSyncEnabled = false;
+      const controlSpeed = window.GBAKSpeed.createSpeedController(() => window.EJS_emulator);
 
       function flushSaveToDisk() {
         try {
@@ -241,66 +243,17 @@
       window.addEventListener('beforeunload', flushSaveToDisk);
       window.addEventListener('pagehide', flushSaveToDisk);
 
-      function applySpeed(fastForward, speedMultiplier) {
-        const ratio = Math.max(1, parseFloat(speedMultiplier) || 2.0);
-        window.EJS_isFastForward = !!fastForward;
-        const ejs = window.EJS_emulator;
-        const gm = ejs?.gameManager;
-
-        if (ejs) {
-          ejs.isFastForward = !!fastForward;
-          if (ejs.settings) {
-            ejs.settings['ff-ratio'] = ratio.toString();
-            ejs.settings['fastForward'] = fastForward ? 'enabled' : 'disabled';
-          }
-        }
-
-        if (gm) {
-          try {
-            const setRatio = gm.setFastForwardRatio || gm.functions?.setFastForwardRatio;
-            if (setRatio) {
-              setRatio.call(gm, ratio);
-            }
-
-            const toggleFF = gm.toggleFastForward || gm.functions?.toggleFastForward;
-            if (toggleFF) {
-              toggleFF.call(gm, fastForward ? 1 : 0);
-            }
-
-            // VSync toggle: Unbind when fast-forwarding or if user disabled VSync
-            const setVSync = gm.setVSync || gm.functions?.setVSync;
-            if (setVSync) {
-              setVSync.call(gm, (fastForward || !userVSyncEnabled) ? 0 : 1);
-            }
-
-            // CRITICAL: mGBA libretro mgba_frameskip accepts integers "0" to "10", NOT strings like "auto"
-            // For 1x: "0" (no frameskip, perfectly smooth)
-            // For 2x: "1" (skip 1 frame)
-            // For 3x: "2"
-            // For 5x: "4" (skip 4 frames, render 1 frame -> 80% render reduction -> full 5x speed)
-            const setVar = gm.setVariable || gm.functions?.setVariable;
-            if (setVar) {
-              let fsVal = "0";
-              if (fastForward && ratio > 1.0) {
-                fsVal = Math.min(8, Math.max(1, Math.round(ratio) - 1)).toString();
-              }
-              setVar.call(gm, 'mgba_frameskip', fsVal);
-              setVar.call(gm, 'mgba_idle_optimization', "Don't Remove");
-            }
-
-            // Toggle audio_sync: OFF during fast-forward (so audio doesn't throttle CPU),
-            // ON at normal speed (so main loop syncs to audio output ~60Hz)
-            if (gm.Module && gm.Module.ccall) {
-              try {
-                gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'],
-                  ['audio_sync', fastForward ? 'false' : 'true']);
-                gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'],
-                  ['video_vsync', (fastForward || !userVSyncEnabled) ? 'false' : 'true']);
-              } catch (e) {}
-            }
-          } catch (err) {}
-        }
+      function applySpeed(fastForward, speedMultiplier, force = false) {
+        const applied = controlSpeed(fastForward, speedMultiplier, userVSyncEnabled, force);
+        window.EJS_isFastForward = Boolean(window.EJS_emulator?.isFastForward);
+        return applied;
       }
+
+      window.EJS_applySpeed = function(fastForward, speedMultiplier, vsyncEnabled, force = false) {
+        pendingSpeed = { fastForward, speedMultiplier };
+        userVSyncEnabled = Boolean(vsyncEnabled);
+        return applySpeed(fastForward, speedMultiplier, force);
+      };
 
       window.addEventListener('message', function(e) {
         if (e.source !== window.parent) return;
@@ -308,21 +261,10 @@
         if (e.data.type === 'EJS_RESUME_AUDIO') {
           tryUnlockAudio();
         } else if (e.data.type === 'EJS_SET_SPEED') {
-          pendingSpeed = { fastForward: e.data.fastForward, speedMultiplier: e.data.speedMultiplier };
-          applySpeed(e.data.fastForward, e.data.speedMultiplier);
+          window.EJS_applySpeed(e.data.fastForward, e.data.speedMultiplier, e.data.vsyncEnabled, e.data.force);
         } else if (e.data.type === 'EJS_SET_VSYNC') {
           userVSyncEnabled = !!e.data.enabled;
-          try {
-            const gm = window.EJS_emulator?.gameManager;
-            const setVSync = gm?.setVSync || gm?.functions?.setVSync;
-            if (setVSync) {
-              setVSync.call(gm, (window.EJS_emulator?.isFastForward || !userVSyncEnabled) ? 0 : 1);
-            }
-            if (gm?.Module?.ccall) {
-              gm.Module.ccall('retroarch_set_config_option', 'void', ['string', 'string'],
-                ['video_vsync', (window.EJS_emulator?.isFastForward || !userVSyncEnabled) ? 'false' : 'true']);
-            }
-          } catch (err) {}
+          if (pendingSpeed) applySpeed(pendingSpeed.fastForward, pendingSpeed.speedMultiplier);
         } else if (e.data.type === 'EJS_SET_VOLUME') {
           try {
             const volume = parseFloat(e.data.volume);
